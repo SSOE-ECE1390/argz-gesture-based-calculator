@@ -1,5 +1,5 @@
-# ExampleTeam
-Example Project Repo for VirtualWebCam
+# ARGZ
+ECE 2390 project: ARGZ Gesture-Based Calculator
 
 <!-- This sets up to run the tests and place a badge on GitHub if it passes -->
 
@@ -8,12 +8,22 @@ Example Project Repo for VirtualWebCam
 
 
 Brief Description:
-The goal of this project is to build a virtual webcam to allow manipulations of live-video feeds from a webcam to be used in Zoom
+The goal of this project is to develop a gesture-based calculator capable of performing basic mathematical operations such as addition, subtraction, multiplication, and division. The calculator will accept multiple integer inputs from a user by interpreting the user's hand gestures through live video and will perform the desired calculations as indicated by the user.
+
 
 Team Members:
-Dr Huppert (huppert1@pitt.edu)
-Yang Du (yang.du@pitt.edu)
+Zachary Waddell (zmw24@pitt.edu)
+Gabrielle Stokes (gos50@pitt.edu)
+Ram Goenka (rag334@pitt.edu)
+Allen Wang (axw12@pitt.edu)
 
+
+Milestones:
+* 
+* 
+* 
+* 
+* 
 
 
 ## File Descriptions

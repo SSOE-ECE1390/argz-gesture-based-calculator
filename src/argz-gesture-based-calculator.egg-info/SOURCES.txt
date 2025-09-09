@@ -1,0 +1,15 @@
+LICENSE.md
+README.md
+pyproject.toml
+setup.cfg
+setup.py
+src/argz-gesture-based-calculator/__init__.py
+src/argz-gesture-based-calculator/example_code.py
+src/argz-gesture-based-calculator/py.typed
+src/argz-gesture-based-calculator.egg-info/PKG-INFO
+src/argz-gesture-based-calculator.egg-info/SOURCES.txt
+src/argz-gesture-based-calculator.egg-info/dependency_links.txt
+src/argz-gesture-based-calculator.egg-info/not-zip-safe
+src/argz-gesture-based-calculator.egg-info/requires.txt
+src/argz-gesture-based-calculator.egg-info/top_level.txt
+tests/test_calculator.py

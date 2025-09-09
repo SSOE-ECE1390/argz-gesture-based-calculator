@@ -1,8 +1,8 @@
 Metadata-Version: 2.4
-Name: virtualwebcam
+Name: argz-gesture-based-calculator
 Version: 0.0.0
-Summary: example project for ECE 1390/2390
-Author: Dr Huppert
+Summary: Gesture-based calculator for ECE 2390
+Author: Zach Waddell, Gabrielle Stokes, Ram Goenka, and Allen Wang
 License: MIT
 Platform: unix
 Platform: linux
