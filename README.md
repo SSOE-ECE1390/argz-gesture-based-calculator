@@ -2,29 +2,26 @@
 ECE 2390 project: ARGZ Gesture-Based Calculator
 
 <!-- This sets up to run the tests and place a badge on GitHub if it passes -->
-
-
 ![Tests](https://github.com/SSOE-ECE1390/ExampleTeam/actions/workflows/tests.yml/badge.svg)
 
 
-Brief Description:
-The goal of this project is to develop a gesture-based calculator capable of performing basic mathematical operations such as addition, subtraction, multiplication, and division. The calculator will accept multiple integer inputs from a user by interpreting the user's hand gestures through live video and will perform the desired calculations as indicated by the user.
+## Project Description
+The goal of this project is to develop a gesture-based calculator capable of performing basic mathematical operations such as addition, subtraction, multiplication, and division. The calculator will accept multiple integer inputs from a user by interpreting the user's hand gestures through live video and will perform the desired calculations as indicated by the user. This also includes hand position tracking so that gestures from only one user will be interpreted at a time.
 
 
-Team Members:
-Zachary Waddell (zmw24@pitt.edu)
-Gabrielle Stokes (gos50@pitt.edu)
-Ram Goenka (rag334@pitt.edu)
-Allen Wang (axw12@pitt.edu)
+## Team Members
+* Zachary Waddell (zmw24@pitt.edu)
+* Gabrielle Stokes (gos50@pitt.edu)
+* Ram Goenka (rag334@pitt.edu)
+* Allen Wang (axw12@pitt.edu)
 
 
-Milestones:
-* 
-* 
-* 
-* 
-* 
-* 
+## Milestones
+* 09/22/2025 - Project planning finished
+* 10/20/2025 - Basic image-based gesture detection working
+* 11/03/2025 - Calculator functionality working
+* 11/17/2025 - Project demonstration
+* 12/01/2025 - Project due date
 
 
 ## File Descriptions
