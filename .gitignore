@@ -3,4 +3,5 @@
 .tox/
 .pytest_cache/
 .mypy_cache/
-src/argz-gesture-based-calculator.egg-info/
+*.egg-info/
+
