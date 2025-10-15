@@ -1,15 +1,6 @@
-#GitHub repos used for code:
-# - https://github.com/Mordekai66/finger-counter-mediapipe/blob/main/main.py
-# - https://github.com/HarshitDolu/Finger-Counter-using-mediapipe/blob/main/Finger_counter.py
-# - https://github.com/Sousannah/hand-tracking-using-mediapipe/blob/main/hand_tracking.py
-# - https://github.com/Real-J/Finger-Counting-with-OpenCV-and-MediaPipe/blob/main/finger_counting.py
-
-#Mediapipe docs
-# - https://mediapipe-studio.webapps.google.com/studio/demo/gesture_recognizer
-
-
 import cv2
 import mediapipe as mp
+import math
 
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
@@ -36,20 +27,51 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height):
     # Initialize finger count as 0
     fingers = 0
 
+    # --- helpers / normalized thresholds (do not change comments above) ---
+    xs = [p.x for p in lm]
+    ys = [p.y for p in lm]
+    hand_w = (max(xs) - min(xs)) if xs else 0.0
+    hand_h = (max(ys) - min(ys)) if ys else 0.0
+    scale = max(hand_w, hand_h) or 1e-6
+    margin_y = 0.04 * scale         # vertical separation for original rule
+    margin_d = 0.06 * scale         # radial separation (helps closed fist)
+
+    def dist(a, b):
+        return math.hypot(a.x - b.x, a.y - b.y)
+
+    def angle(a, b, c):
+        # returns angle ABC in degrees
+        ux, uy = a.x - b.x, a.y - b.y
+        vx, vy = c.x - b.x, c.y - b.y
+        du = math.hypot(ux, uy) or 1e-6
+        dv = math.hypot(vx, vy) or 1e-6
+        cosang = (ux * vx + uy * vy) / (du * dv)
+        cosang = max(-1.0, min(1.0, cosang))
+        return math.degrees(math.acos(cosang))
+
+    wrist = lm[0]
+
     # Count other fingers (index, middle, ring, pinky)
     # A finger is considered "raised" if its tip landmark is above its PIP joint
     for tip_idx, pip_idx in zip(FINGER_TIPS, FINGER_PIPS):
-        if lm[tip_idx].y < lm[pip_idx].y: # y decreases as we go up
+        # Original palm-friendly criterion
+        tip_up = lm[tip_idx].y < (lm[pip_idx].y - margin_y) # y decreases as we go up
+        # View-invariant backup: finger is straight and radially extended
+        mcp_idx = pip_idx - 1  # MCP is one index before the PIP for these fingers
+        straight = angle(lm[mcp_idx], lm[pip_idx], lm[tip_idx]) > 160.0
+        radial = dist(wrist, lm[tip_idx]) > dist(wrist, lm[pip_idx]) + margin_d
+
+        if (tip_up and radial) or (straight and radial):
             fingers += 1
 
     # Thumb logic
     # The thumb moves sideways, so we compare x-coordinates instead of y.
-    if handedness_label == "Right":
-        if lm[THUMB_TIP].x < lm[THUMB_IP].x:
-            fingers += 1
-    else:
-        if lm[THUMB_TIP].x > lm[THUMB_IP].x:
-            fingers += 1
+    # View-invariant: straight + radially farther from wrist than its IP (prevents fist=1)
+    thumb_straight = angle(lm[THUMB_MCP], lm[THUMB_IP], lm[THUMB_TIP]) > 160.0
+    thumb_radial = dist(wrist, lm[THUMB_TIP]) > dist(wrist, lm[THUMB_IP]) + (margin_d * 0.5)
+
+    if thumb_straight and thumb_radial:
+        fingers += 1
 
     return fingers
 
@@ -60,7 +82,7 @@ def main():
     # ** FOR NON-MAC CHANGE to cv2.VideoCapture(0)
     # ** WINDOWS SPECIFIC is cv2.VideoCapture(0, cv2.CAP_DSHOW)
     # ** MAC uses cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
         raise RuntimeError("webcam err")
 
@@ -124,33 +146,15 @@ def main():
                                 (x - 40, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
-            # Perform calculations
-            sum_fingers = left_fingers + right_fingers
-            product_fingers = left_fingers * right_fingers
-            difference_fingers = left_fingers - right_fingers
-            quotient_fingers = round(left_fingers / right_fingers, 2) if right_fingers != 0 else 0.0
-
             # Display information box in top-left corner
             # Note that the text colors are specified in BGR format
-            cv2.rectangle(frame, (10, 10), (380, 220), (0, 0, 0), -1)
+            cv2.rectangle(frame, (10, 10), (380, 100), (0, 0, 0), -1)
             cv2.putText(frame, f"Left Hand: {left_fingers}",
                         (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
                         0.9, (255, 255, 255), 2, cv2.LINE_AA)
             cv2.putText(frame, f"Right Hand: {right_fingers}",
-                        (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                        (20, 80), cv2.FONT_HERSHEY_SIMPLEX,
                         0.9, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Sum (L+R): {sum_fingers}",
-                        (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (0, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Product (L*R): {product_fingers}",
-                        (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (0, 0, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Difference (L-R): {difference_fingers}",
-                        (20, 160), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (255, 0, 0), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Quotient (L/R): {quotient_fingers}",
-                        (20, 190), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (0, 255, 0), 2, cv2.LINE_AA)
 
             # Show the processed frame in window
             cv2.imshow("Finger Counter", frame)
