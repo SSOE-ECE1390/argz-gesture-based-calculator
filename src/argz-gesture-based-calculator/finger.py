@@ -26,8 +26,6 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height):
 
     # Initialize finger count as 0
     fingers = 0
-
-    # --- helpers / normalized thresholds (do not change comments above) ---
     xs = [p.x for p in lm]
     ys = [p.y for p in lm]
     hand_w = (max(xs) - min(xs)) if xs else 0.0
