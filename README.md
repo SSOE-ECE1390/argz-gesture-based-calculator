@@ -18,8 +18,9 @@ The goal of this project is to develop a gesture-based calculator capable of per
 
 ## Milestones
 * 09/22/2025 - Project planning finished
-* 10/20/2025 - Basic image-based gesture detection working
+* 10/20/2025 - Basic MediaPipe gesture detection and finger counting working
 * 11/03/2025 - Calculator functionality working
+* 11/10/2025 - ROI cropping working
 * 11/17/2025 - Project demonstration
 * 12/01/2025 - Project due date
 

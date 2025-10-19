@@ -7,7 +7,6 @@
 #Mediapipe docs
 # - https://mediapipe-studio.webapps.google.com/studio/demo/gesture_recognizer
 
-
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -21,12 +20,8 @@ if not os.path.exists("gesture_recognizer.task"):
     urllib.request.urlretrieve(url, "gesture_recognizer.task")
     print("Model downloaded successfully.")
 
-
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
-
-
-
 
 def count_fingers(hand_landmarks, handedness_label, image_width, image_height):
     """
@@ -87,6 +82,12 @@ def main():
     options = vision.GestureRecognizerOptions(base_options=base_options)
     recognizer = vision.GestureRecognizer.create_from_options(options)
 
+    gesture_result = ""
+    most_recent_gesture = ""
+
+    # Initialize previous gesture to None before loop
+    main.previous_gesture = None
+
     # Initialize MediaPipe Hands model
     with mp_hands.Hands(
         static_image_mode=False,      # Use video stream (not static images)
@@ -96,7 +97,9 @@ def main():
         min_tracking_confidence=0.6,  # Minimum confidence for tracking
     ) as hands:
         
-        # Infinite loop
+        #-----------------------------------------------------------------------------------------------------
+        # Main loop
+
         while True:
             # Read a frame from the webcam
             ok, frame = cap.read()
@@ -111,6 +114,9 @@ def main():
             rgb.flags.writeable = False
             results = hands.process(rgb)
             rgb.flags.writeable = True
+
+            #--------------------------------------------------------------------------------------------
+            # Finger counting
 
             # Initialize finger counts for each hand
             left_fingers = 0
@@ -144,60 +150,120 @@ def main():
                                 (x - 40, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.8, (255, 255, 255), 2, cv2.LINE_AA)
 
-            # Perform calculations
+            # Display status information box in top-left corner with lines 1 and 2
+            # Note that the text colors are specified in BGR format
+            cv2.rectangle(frame, (10, 10), (380, 160), (0, 0, 0), -1)
+            cv2.putText(frame, f"Left Hand: {left_fingers}",
+                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
+                        1, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(frame, f"Right Hand: {right_fingers}",
+                        (20, 75), cv2.FONT_HERSHEY_SIMPLEX,
+                        1, (255, 255, 255), 2, cv2.LINE_AA)
+            
+            #-----------------------------------------------------------------------------------------------------
+            # Gesture recognition
+
+            # Run gesture recognizer
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            gesture_result = recognizer.recognize(mp_image)
+
+            # Define the gestures that we should ignore. These will NOT cause the previous gesture to be updated.
+            invalid_gestures_list = {"None", "Victory", "Pointing_Up", "Open_Palm", ""}
+
+            # Confidence threshold to detect a new gesture
+            confidence_threshold = 0.60
+
+            # Retrieve persistent previous gesture (may be None initially)
+            previous_gesture = getattr(main, "previous_gesture", None)
+
+            # Start by assuming we will keep whatever previous valid gesture we already have
+            most_recent_gesture = previous_gesture
+
+            # Extract the top gesture and see if it is valid. I think this try/exception is necessary to prevent
+            # crashing if there isn't a valid gesture.
+            candidate = None
+            if gesture_result and getattr(gesture_result, "gestures", None):
+                try:
+                    candidate = gesture_result.gestures[0][0]
+                except Exception:
+                    candidate = None
+
+            # If we were able to get a valid candidate gesture, then read and validate it.
+            if candidate is not None:
+                category_name = getattr(candidate, "category_name", None)
+                score = getattr(candidate, "score", 0.0)
+
+                # Check what type of gesture was detected and the confidence to determine whether we should use it.
+                # At this point, we also need to ignore certain gestures based on our list.
+                if ((category_name is not None) and (str(category_name) not in invalid_gestures_list) and 
+                    (score >= confidence_threshold)):
+                    main.previous_gesture = candidate
+                    most_recent_gesture = candidate
+                else:
+                    # If the candidate is invalid, do NOT overwrite the previous valid gesture
+                    most_recent_gesture = previous_gesture
+
+            # Format gesture output text
+            if ((most_recent_gesture is not None) and
+                (getattr(most_recent_gesture, "category_name", None) not in invalid_gestures_list)):
+
+                # Format score and add to output text with gesture
+                score = getattr(most_recent_gesture, "score", 0.0)
+                gesture_text = f"{most_recent_gesture.category_name} ({score:.2f})"
+            else:
+                # At startup, we will be waiting for the first operation gesture from the user.
+                gesture_text = "Waiting for operation"
+
+            # Display line 3
+            cv2.putText(frame, gesture_text,
+                        (20, 110), cv2.FONT_HERSHEY_SIMPLEX,
+                        1, (255, 0, 0), 2, cv2.LINE_AA)
+
+            #-----------------------------------------------------------------------------------------------------
+            # Calculator
+            
+            # Perform all calculations using the current finger counts
             sum_fingers = left_fingers + right_fingers
             product_fingers = left_fingers * right_fingers
             difference_fingers = left_fingers - right_fingers
             quotient_fingers = round(left_fingers / right_fingers, 2) if right_fingers != 0 else 0.0
 
-            # Display information box in top-left corner
-            # Note that the text colors are specified in BGR format
-            cv2.rectangle(frame, (10, 10), (380, 220), (0, 0, 0), -1)
-            cv2.putText(frame, f"Left Hand: {left_fingers}",
-                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Right Hand: {right_fingers}",
-                        (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Sum (L+R): {sum_fingers}",
-                        (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (0, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Product (L*R): {product_fingers}",
-                        (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (0, 0, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Difference (L-R): {difference_fingers}",
-                        (20, 160), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (255, 0, 0), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Quotient (L/R): {quotient_fingers}",
-                        (20, 190), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.9, (0, 255, 0), 2, cv2.LINE_AA)
+            # Get the previous gesture name, if there is one
+            remembered_name = None
+            if (getattr(main, "previous_gesture", None) is not None):
+                remembered_name = getattr(getattr(main, "previous_gesture", None), "category_name", None)
 
+            # Addition - "Thumb_Up"
+            # Subtraction - "Thumb_Down"
+            # Multiplication - "Closed_Fist"
+            # Division - "ILoveYou", the Spiderman gesture
+            if remembered_name:
+                if "Thumb_Up" in remembered_name:
+                    operation_text = "Addition (L + R)"
+                    operation_result_text = f"{sum_fingers}"
+                elif "Thumb_Down" in remembered_name:
+                    operation_text = "Subtraction (L - R)"
+                    operation_result_text = f"{difference_fingers}"
+                elif "Closed_Fist" in remembered_name:
+                    operation_text = "Multiplication (L * R)"
+                    operation_result_text = f"{product_fingers}"
+                elif "ILoveYou" in remembered_name:
+                    operation_text = "Division (L / R)"
+                    operation_result_text = f"{quotient_fingers}"
+            else:
+                operation_text = None
+                operation_result_text = None
 
-            # Gesture recognition
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            gesture_result = recognizer.recognize(mp_image)
-
-            # Set the gesture text based on the one with the highest probability (if one is detected)
-            gesture_text = "No gesture detected"
-            if gesture_result.gestures:
-                top_gesture = gesture_result.gestures[0][0]
-                gesture_text = f"{top_gesture.category_name} ({top_gesture.score:.2f})"
-
-            # Display the detected gesture on the frame
-            cv2.putText(frame, gesture_text,
-                        (20, 300), cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (0, 255, 0), 2, cv2.LINE_AA)
-
-
-
-
-            # If above ~80% confident that a palm is in view, then we count fingers. Otherwise, we're either transitioning or gesturing...?
-
-
-
-
-
-
+            # If there is an updated gesture, display it (lines 4 and 5)
+            if operation_text is not None and operation_result_text is not None:
+                cv2.putText(frame, f"{operation_text}",
+                            (20, 145), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 0, 0), 2, cv2.LINE_AA)
+                cv2.putText(frame, f"Result: {operation_result_text}",
+                            (20, 210), cv2.FONT_HERSHEY_SIMPLEX,
+                            1.5, (0, 255, 255), 2, cv2.LINE_AA)
+            
+            #-----------------------------------------------------------------------------------------------------
 
             # Show the processed frame in window
             cv2.imshow("Finger Counter", frame)
