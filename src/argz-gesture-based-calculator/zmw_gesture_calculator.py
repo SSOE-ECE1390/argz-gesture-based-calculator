@@ -12,6 +12,7 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import os, urllib.request
+import time
 
 # Download default gesture model if it doesn't exist
 if not os.path.exists("gesture_recognizer.task"):
@@ -73,7 +74,9 @@ def main():
     if not cap.isOpened():
         raise RuntimeError("webcam err")
 
-    # Set video resolution to 1280x720
+    # Set video resolution to 1280x720. Note that lowering the resolution slightly improves performance.
+    #cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    #cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
@@ -84,17 +87,17 @@ def main():
 
     gesture_result = ""
     most_recent_gesture = ""
-
-    # Initialize previous gesture to None before loop
     main.previous_gesture = None
+    prev_time = time.time()
+    frame_count = 0
 
     # Initialize MediaPipe Hands model
     with mp_hands.Hands(
-        static_image_mode=False,      # Use video stream (not static images)
-        max_num_hands=2,              # Detect up to 2 hands
-        model_complexity=1,           # Default complexity
-        min_detection_confidence=0.6, # Minimum confidence for detection
-        min_tracking_confidence=0.6,  # Minimum confidence for tracking
+        static_image_mode = False,      # Use video stream (not static images)
+        max_num_hands = 2,              # Detect up to 2 hands
+        model_complexity = 0,           # Using 0 improves frame rate, while 1 improves model accuracy
+        min_detection_confidence = 0.6, # Minimum confidence for detection
+        min_tracking_confidence = 0.6,  # Minimum confidence for tracking
     ) as hands:
         
         #-----------------------------------------------------------------------------------------------------
@@ -163,9 +166,16 @@ def main():
             #-----------------------------------------------------------------------------------------------------
             # Gesture recognition
 
+            # Only run gesture recognition every 3 frames to improve frame rate without sacrificing much performance.
+            frame_count += 1
+            if frame_count % 3 == 0:
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                gesture_result = recognizer.recognize(mp_image)
+                frame_count = 0
+
             # Run gesture recognizer
-            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            gesture_result = recognizer.recognize(mp_image)
+            #mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+            #gesture_result = recognizer.recognize(mp_image)
 
             # Define the gestures that we should ignore. These will NOT cause the previous gesture to be updated.
             invalid_gestures_list = {"None", "Victory", "Pointing_Up", "Open_Palm", ""}
@@ -264,6 +274,14 @@ def main():
                             1.5, (0, 255, 255), 2, cv2.LINE_AA)
             
             #-----------------------------------------------------------------------------------------------------
+
+            # Calculate FPS and display it on the frame
+            current_time = time.time()
+            fps = round(1 / (current_time - prev_time))
+            prev_time = current_time
+            cv2.putText(frame, f"FPS: {fps}",
+                        (1100, 40), cv2.FONT_HERSHEY_SIMPLEX,
+                        1, (255, 255, 255), 2, cv2.LINE_AA)
 
             # Show the processed frame in window
             cv2.imshow("Finger Counter", frame)
