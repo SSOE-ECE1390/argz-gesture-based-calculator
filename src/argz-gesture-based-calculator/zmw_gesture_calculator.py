@@ -1,12 +1,3 @@
-#GitHub repos used for code:
-# - https://github.com/Mordekai66/finger-counter-mediapipe/blob/main/main.py
-# - https://github.com/HarshitDolu/Finger-Counter-using-mediapipe/blob/main/Finger_counter.py
-# - https://github.com/Sousannah/hand-tracking-using-mediapipe/blob/main/hand_tracking.py
-# - https://github.com/Real-J/Finger-Counting-with-OpenCV-and-MediaPipe/blob/main/finger_counting.py
-
-#Mediapipe docs
-# - https://mediapipe-studio.webapps.google.com/studio/demo/gesture_recognizer
-
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python
@@ -91,6 +82,20 @@ def main():
     prev_time = time.time()
     frame_count = 0
 
+    # State machine variables
+    state = 1                      # Current state
+    first_number = None            # User's first number input
+    operation = None               # User's operation input
+    second_number = None           # User's second number input
+    stable_value = None            # Current candidate being held
+    stable_start = None            # Time when candidate first observed
+    stable_required_seconds = 5.0  # Time required to "accept" user input
+
+    # Define helper function to reset stable tracking when entering a new state or when
+    # candidate changes in the calculator state machine.
+    def reset_stable(new_candidate, now):
+        return new_candidate, now
+
     # Initialize MediaPipe Hands model
     with mp_hands.Hands(
         static_image_mode = False,      # Use video stream (not static images)
@@ -152,16 +157,6 @@ def main():
                     cv2.putText(frame, f"{label}: {fingers_up}",
                                 (x - 40, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.8, (255, 255, 255), 2, cv2.LINE_AA)
-
-            # Display status information box in top-left corner with lines 1 and 2
-            # Note that the text colors are specified in BGR format
-            cv2.rectangle(frame, (10, 10), (380, 160), (0, 0, 0), -1)
-            cv2.putText(frame, f"Left Hand: {left_fingers}",
-                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (255, 255, 255), 2, cv2.LINE_AA)
-            cv2.putText(frame, f"Right Hand: {right_fingers}",
-                        (20, 75), cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (255, 255, 255), 2, cv2.LINE_AA)
             
             #-----------------------------------------------------------------------------------------------------
             # Gesture recognition
@@ -172,10 +167,6 @@ def main():
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
                 gesture_result = recognizer.recognize(mp_image)
                 frame_count = 0
-
-            # Run gesture recognizer
-            #mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            #gesture_result = recognizer.recognize(mp_image)
 
             # Define the gestures that we should ignore. These will NOT cause the previous gesture to be updated.
             invalid_gestures_list = {"None", "Victory", "Pointing_Up", "Open_Palm", ""}
@@ -224,20 +215,6 @@ def main():
                 # At startup, we will be waiting for the first operation gesture from the user.
                 gesture_text = "Waiting for operation"
 
-            # Display line 3
-            cv2.putText(frame, gesture_text,
-                        (20, 110), cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (255, 0, 0), 2, cv2.LINE_AA)
-
-            #-----------------------------------------------------------------------------------------------------
-            # Calculator
-            
-            # Perform all calculations using the current finger counts
-            sum_fingers = left_fingers + right_fingers
-            product_fingers = left_fingers * right_fingers
-            difference_fingers = left_fingers - right_fingers
-            quotient_fingers = round(left_fingers / right_fingers, 2) if right_fingers != 0 else 0.0
-
             # Get the previous gesture name, if there is one
             remembered_name = None
             if (getattr(main, "previous_gesture", None) is not None):
@@ -249,29 +226,170 @@ def main():
             # Division - "ILoveYou", the Spiderman gesture
             if remembered_name:
                 if "Thumb_Up" in remembered_name:
-                    operation_text = "Addition (L + R)"
-                    operation_result_text = f"{sum_fingers}"
+                    operation_text = "Addition"
                 elif "Thumb_Down" in remembered_name:
-                    operation_text = "Subtraction (L - R)"
-                    operation_result_text = f"{difference_fingers}"
+                    operation_text = "Subtraction"
                 elif "Closed_Fist" in remembered_name:
-                    operation_text = "Multiplication (L * R)"
-                    operation_result_text = f"{product_fingers}"
+                    operation_text = "Multiplication"
                 elif "ILoveYou" in remembered_name:
-                    operation_text = "Division (L / R)"
-                    operation_result_text = f"{quotient_fingers}"
+                    operation_text = "Division"
             else:
                 operation_text = None
-                operation_result_text = None
 
-            # If there is an updated gesture, display it (lines 4 and 5)
-            if operation_text is not None and operation_result_text is not None:
+            # Display gesture result and the corresponding operation, if there is one
+            cv2.rectangle(frame, (10, 10), (600, 150), (0, 0, 0), -1)
+            cv2.putText(frame, gesture_text,
+                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
+                        1, (255, 0, 0), 2, cv2.LINE_AA)
+            if (operation_text is not None):
                 cv2.putText(frame, f"{operation_text}",
-                            (20, 145), cv2.FONT_HERSHEY_SIMPLEX,
+                            (350, 40), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 0, 0), 2, cv2.LINE_AA)
-                cv2.putText(frame, f"Result: {operation_result_text}",
-                            (20, 210), cv2.FONT_HERSHEY_SIMPLEX,
-                            1.5, (0, 255, 255), 2, cv2.LINE_AA)
+
+            #-----------------------------------------------------------------------------------------------------
+            # Calculator state machine
+            #
+            # State definitions:
+            # 1 - Wait for first number. If stable for stable_required_seconds, accept first_number input.
+            # 2 - Wait for operation gesture. If stable for stable_required_seconds, accept operation input.
+            # 3 - Wait for second number. If stable for stable_required_seconds, accept second_number input.
+            # 4 - Show calculation result until 'r' is pressed, then reset to state 1
+
+            # Current candidate values
+            candidate_number = (left_fingers + right_fingers)  # fingers held up between left and right hands, 0-10
+            candidate_gesture_name = None
+            if (most_recent_gesture is not None) and (getattr(most_recent_gesture, "category_name", None) not in invalid_gestures_list):
+                candidate_gesture_name = getattr(most_recent_gesture, "category_name", None)
+
+            # Save the time before running the state machine for this frame
+            now = time.time()
+
+            # State 1: Get first number input
+            if (state == 1):
+                # Display prompt
+                cv2.putText(frame, f"Enter the first operand",
+                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # Initialize stable value if it's currently None
+                if (stable_value is None):
+                    stable_value, stable_start = reset_stable(candidate_number, now)
+
+                # If the candidate number changed, restart the timer
+                if (candidate_number != stable_value):
+                    stable_value, stable_start = reset_stable(candidate_number, now)
+
+                # If the timer has completed successfully with a valid number, save the first number
+                if ((stable_start is not None) and ((now - stable_start) >= stable_required_seconds)):
+                    first_number = stable_value
+                    state = 2
+
+                    # Clear stable values before going to new state
+                    stable_value = None
+                    stable_start = None
+
+            # State 2: Get operation input
+            elif (state == 2):
+                # Display prompt
+                cv2.putText(frame, f"Enter the desired operation",
+                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # Initialize stable value if it's currently None
+                if ((stable_value is None) and (candidate_gesture_name is not None)):
+                    stable_value, stable_start = reset_stable(candidate_gesture_name, now)
+
+                # If the candidate gesture changed, restart the timer
+                if (candidate_gesture_name != stable_value):
+                    stable_value, stable_start = reset_stable(candidate_gesture_name, now)
+
+                # If the timer has completed successfully with a valid operation, save the operation
+                if ((stable_start is not None) and (stable_value not in invalid_gestures_list) and ((now - stable_start) >= stable_required_seconds)):
+                    operation = stable_value
+                    state = 3
+
+                    # Clear stable values before going to new state
+                    stable_value = None
+                    stable_start = None
+
+            # State 3: Get second number input
+            elif state == 3:
+                # Waiting for second number
+                cv2.putText(frame, f"Enter the second operand",
+                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # Initialize stable value if it's currently None
+                if (stable_value is None):
+                    stable_value, stable_start = reset_stable(candidate_number, now)
+
+                # If the candidate number changed, restart the timer
+                if (candidate_number != stable_value):
+                    stable_value, stable_start = reset_stable(candidate_number, now)
+
+                # If the timer has completed successfully with a valid number, save the first number
+                if ((stable_start is not None) and ((now - stable_start) >= stable_required_seconds)):
+                    second_number = stable_value
+                    state = 4
+
+            # State 4: Display the calculation result
+            elif state == 4:
+                # Display program completion text
+                cv2.putText(frame, f"Calculation complete.",
+                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, f"Press 'r' to restart the calculator.",
+                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 255, 255), 2, cv2.LINE_AA)
+
+                # Perform the desired calculation
+                if "Thumb_Up" in operation:
+                    result_value = (first_number + second_number)
+                elif "Thumb_Down" in operation:
+                    result_value = (first_number - second_number)
+                elif "Closed_Fist" in operation:
+                    result_value = (first_number * second_number)
+                elif "ILoveYou" in operation:
+                    if second_number == 0:
+                        result_value = "Divide by zero"
+                    else:
+                        result_value = round(first_number / second_number, 4)
+                else:
+                    result_value = "ERROR"
+
+                # Map the gesture names to operation symbols for displaying them
+                gesture_symbol_map = {"Thumb_Up": "+", "Thumb_Down": "-", "Closed_Fist": "*", "ILoveYou": "/"}
+                
+                # Display calculation with result on frame
+                cv2.putText(frame, f"{first_number} {gesture_symbol_map.get(operation, operation)} {second_number} = {result_value}",
+                            (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (0, 255, 255), 2, cv2.LINE_AA)
+
+            # Display the current number and a countdown timer if in state 1 or 3
+            if ((state == 1) or (state ==3)):
+                # Show candidate number and countdown
+                if (stable_start is not None):
+                    remaining = (stable_required_seconds - (now - stable_start))
+                else:
+                    remaining = stable_required_seconds
+                
+                # Display info on frame
+                cv2.putText(frame, f"Input: {candidate_number}  Timer: {remaining:.1f} sec",
+                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 255, 255), 2, cv2.LINE_AA)
+            
+            # Display the current operation and a countdown timer if in state 2
+            elif (state == 2):
+                # Show candidate operations and countdown
+                if (stable_start is not None):
+                    remaining = max(0, stable_required_seconds - (now - stable_start))
+                else:
+                    remaining = stable_required_seconds
+
+                # Display info on frame
+                cv2.putText(frame, f"Input: {candidate_gesture_name}  Timer: {remaining:.1f} sec",
+                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 255, 255), 2, cv2.LINE_AA)
             
             #-----------------------------------------------------------------------------------------------------
 
@@ -286,10 +404,18 @@ def main():
             # Show the processed frame in window
             cv2.imshow("Finger Counter", frame)
 
-            # Exit loop when 'q' is pressed
+            # Exit loop when 'q' is pressed or reset calculator when 'r' is pressed
             key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
+            if ((key == ord('q')) or (key == ord('Q'))):
                 break
+            elif ((key == ord('r')) or (key == ord('R'))):
+                # Reset state machine to initial state and restart calculator at state 1
+                first_number = None
+                operation = None
+                second_number = None
+                stable_value = None
+                stable_start = None
+                state = 1
 
     # Release camera and close window
     cap.release()
@@ -297,10 +423,3 @@ def main():
 
 # Run the main loop
 main()
-
-
-
-
-
-
-
