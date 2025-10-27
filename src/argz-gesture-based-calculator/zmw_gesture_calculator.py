@@ -4,6 +4,8 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import os, urllib.request
 import time
+import numpy as np
+import math
 
 # Download default gesture model if it doesn't exist
 if not os.path.exists("gesture_recognizer.task"):
@@ -12,10 +14,13 @@ if not os.path.exists("gesture_recognizer.task"):
     urllib.request.urlretrieve(url, "gesture_recognizer.task")
     print("Model downloaded successfully.")
 
+# Initialize MediaPipe models
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
+mp_pose = mp.solutions.pose
 
-def count_fingers(hand_landmarks, handedness_label, image_width, image_height):
+# Function for counting fingers
+def count_fingers(hand_landmarks, handedness_label, image_width, image_height, roi=None):
     """
     Count how many fingers are raised on a given hand using landmark positions.
 
@@ -23,6 +28,7 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height):
         hand_landmarks: The 21 hand landmarks detected by MediaPipe.
         handedness_label: 'Left' or 'Right' (determined by MediaPipe).
         image_width, image_height: Dimensions of the current video frame.
+        roi: Region Of Interest wherein fingers will be counted
 
     Returns:
         The number of fingers currently detected as being raised (0-5).
@@ -33,10 +39,49 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height):
     THUMB_TIP, THUMB_IP, THUMB_MCP = 4, 3, 2
     FINGER_TIPS = [8, 12, 16, 20] # Index, Middle, Ring, Pinky fingertips
     FINGER_PIPS = [6, 10, 14, 18] # Corresponding knuckles (PIP joints)
+    FINGER_MCPS = [5, 9, 13, 17]  # 
 
-    # Initialize finger count as 0
+
+    # Calculations used for finger counting
+    xs = [p.x for p in lm]; ys = [p.y for p in lm]
+    hand_w = (max(xs) - min(xs)) if xs else 0.0
+    hand_h = (max(ys) - min(ys)) if ys else 0.0
+    scale = max(hand_w, hand_h) or 1e-6
+    margin_y = 0.04 * scale
+    margin_d = 0.06 * scale
+
+    # Helper function for calculating finger distances
+    def dist(a, b):
+        return math.hypot(a.x - b.x, a.y - b.y)
+
+    # Helper function for calculating finger angles
+    def angle(a, b, c):
+        ux, uy = a.x - b.x, a.y - b.y
+        vx, vy = c.x - b.x, c.y - b.y
+        du = math.hypot(ux, uy) or 1e-6
+        dv = math.hypot(vx, vy) or 1e-6
+        cosang = (ux * vx + uy * vy) / (du * dv)
+        cosang = max(-1.0, min(1.0, cosang))
+        return math.degrees(math.acos(cosang))
+
+    # Helper function for determining whether a finger is inside of the cropped ROI
+    def finger_inside_roi(idxs):
+        if roi is None:
+            return True
+        x0, y0, x1, y1 = roi
+        for idx in idxs:
+            px = int(lm[idx].x * image_width)
+            py = int(lm[idx].y * image_height)
+            if not (x0 <= px <= x1 and y0 <= py <= y1):
+                return False
+        return True
+
+    # Initialize finger count as 0 and the wrist location
     fingers = 0
+    wrist = lm[0]
 
+
+    """
     # Count other fingers (index, middle, ring, pinky)
     # A finger is considered "raised" if its tip landmark is above its PIP joint
     for tip_idx, pip_idx in zip(FINGER_TIPS, FINGER_PIPS):
@@ -51,6 +96,26 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height):
     else:
         if lm[THUMB_TIP].x > lm[THUMB_IP].x:
             fingers += 1
+    """
+
+    # Count the number of valid fingers inside of the ROI
+    for tip_idx, pip_idx, mcp_idx in zip(FINGER_TIPS, FINGER_PIPS, FINGER_MCPS):
+        if not finger_inside_roi([mcp_idx, pip_idx, tip_idx]):
+            continue
+
+        tip_up = lm[tip_idx].y < (lm[pip_idx].y - margin_y)
+        straight = angle(lm[mcp_idx], lm[pip_idx], lm[tip_idx]) > 160.0
+        radial = dist(wrist, lm[tip_idx]) > dist(wrist, lm[pip_idx]) + margin_d
+
+        if (tip_up and radial) or (straight and radial):
+            fingers += 1
+
+    # Count the number of valid thumbs inside of the ROI
+    if finger_inside_roi([THUMB_MCP, THUMB_IP, THUMB_TIP]):
+        thumb_straight = angle(lm[THUMB_MCP], lm[THUMB_IP], lm[THUMB_TIP]) > 160.0
+        thumb_radial = dist(wrist, lm[THUMB_TIP]) > dist(wrist, lm[THUMB_IP]) + (margin_d * 0.5)
+        if thumb_straight and thumb_radial:
+            fingers += 1
 
     return fingers
 
@@ -63,7 +128,7 @@ def main():
     # ** MAC uses cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
     cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
     if not cap.isOpened():
-        raise RuntimeError("webcam err")
+        raise RuntimeError("Webcam error")
 
     # Set video resolution to 1280x720. Note that lowering the resolution slightly improves performance.
     #cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -76,11 +141,19 @@ def main():
     options = vision.GestureRecognizerOptions(base_options=base_options)
     recognizer = vision.GestureRecognizer.create_from_options(options)
 
+    # Initialize variables before use
     gesture_result = ""
     most_recent_gesture = ""
     main.previous_gesture = None
-    prev_time = time.time()
     frame_count = 0
+
+    # Timer used for FPS calculation
+    prev_time = time.time()
+
+    # ROI setup
+    smoothed_roi = None
+    alpha_w = 0.15
+    alpha_h = 0.35
 
     # State machine variables
     state = 1                      # Current state
@@ -96,6 +169,8 @@ def main():
     def reset_stable(new_candidate, now):
         return new_candidate, now
 
+
+    """
     # Initialize MediaPipe Hands model
     with mp_hands.Hands(
         static_image_mode = False,      # Use video stream (not static images)
@@ -104,9 +179,25 @@ def main():
         min_detection_confidence = 0.6, # Minimum confidence for detection
         min_tracking_confidence = 0.6,  # Minimum confidence for tracking
     ) as hands:
-        
+    """
+
+    # Configure models for Pose (used to track body for ROI) and Hands (used to count fingers)
+    with mp_pose.Pose(
+        static_image_mode = False,      # Use video stream (not static images)
+        model_complexity = 0,           # 0 improves frame rate, 1 improves model accuracy
+        enable_segmentation = False,    # 
+        min_detection_confidence = 0.5, # Minimum confidence for detection
+        min_tracking_confidence = 0.5,  # Minimum confidence for tracking
+    ) as pose, mp_hands.Hands(
+        static_image_mode = False,      # Use video stream (not static images)
+        max_num_hands = 2,              # Detect up to 2 hands (TODO: set this higher and test with multiple sets of hands)
+        model_complexity = 0,           # 0 improves frame rate, 1 improves model accuracy
+        min_detection_confidence = 0.6, # Minimum confidence for detection
+        min_tracking_confidence = 0.6,  # Minimum confidence for tracking
+    ) as hands:
+
         #-----------------------------------------------------------------------------------------------------
-        # Main loop
+        # Main Loop
 
         while True:
             # Read a frame from the webcam
@@ -118,13 +209,73 @@ def main():
             frame = cv2.flip(frame, 1)
 
             # Convert frame to RGB (MediaPipe expects RGB)
+            h, w, _ = frame.shape
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pose_results = pose.process(rgb)
+            x_min, y_min, x_max, y_max = 0, 0, w, h
+
+
+            #--------------------------------------------------------------------------------------------
+            # Region Of Interest (ROI)
+
+            # Configure the ROI based on the user's body position
+            if pose_results.pose_landmarks:
+                l_sh = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER]
+                r_sh = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
+                l_hip = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_HIP]
+                r_hip = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_HIP]
+
+                l_sh_xy = (int(l_sh.x * w), int(l_sh.y * h))
+                r_sh_xy = (int(r_sh.x * w), int(r_sh.y * h))
+                l_hip_xy = (int(l_hip.x * w), int(l_hip.y * h))
+                r_hip_xy = (int(r_hip.x * w), int(r_hip.y * h))
+                pad_w = 60
+                x_min = max(0, min(l_sh_xy[0], r_sh_xy[0]) - pad_w)
+                x_max = min(w, max(l_sh_xy[0], r_sh_xy[0]) + pad_w)
+                base_y_min = max(0, min(l_sh_xy[1], r_sh_xy[1]) - 40)
+                base_y_max = min(h, int((l_hip_xy[1] + r_hip_xy[1]) / 2))
+                y_min, y_max = base_y_min, base_y_max
             rgb.flags.writeable = False
             results = hands.process(rgb)
             rgb.flags.writeable = True
 
+            if results.multi_hand_landmarks:
+                hand_min_y = h
+                hand_max_y = 0
+                PAD_Y = 30
+
+                for hand_lms in results.multi_hand_landmarks:
+                    ys = [int(pt.y * h) for pt in hand_lms.landmark]
+                    if not ys: continue
+                    hand_min_y = min(hand_min_y, min(ys))
+                    hand_max_y = max(hand_max_y, max(ys))
+
+                if hand_max_y > 0: 
+                    y_min = min(y_min, hand_min_y - PAD_Y)
+                    y_max = max(y_max, hand_max_y + PAD_Y)
+
+                y_min = max(0, y_min)
+                y_max = min(h, y_max)
+
+            new_roi = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
+
+            if smoothed_roi is None:
+                smoothed_roi = new_roi
+            else:
+                smoothed_roi = np.array([
+                    smoothed_roi[0] * (1 - alpha_w) + new_roi[0] * alpha_w,
+                    smoothed_roi[1] * (1 - alpha_h) + new_roi[1] * alpha_h,
+                    smoothed_roi[2] * (1 - alpha_w) + new_roi[2] * alpha_w,
+                    smoothed_roi[3] * (1 - alpha_h) + new_roi[3] * alpha_h
+                ], dtype=np.float32)
+
+            # Display the ROI on the frame
+            xi, yi, xa, ya = smoothed_roi.astype(int)
+            cv2.rectangle(frame, (xi, yi), (xa, ya), (0, 255, 0), 2)
+
+
             #--------------------------------------------------------------------------------------------
-            # Finger counting
+            # Finger Counting
 
             # Initialize finger counts for each hand
             left_fingers = 0
@@ -134,8 +285,10 @@ def main():
             if results.multi_hand_landmarks and results.multi_handedness:
                 for hand_lms, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                     label = handedness.classification[0].label  # 'Left' or 'Right'
-                    fingers_up = count_fingers(hand_lms, label, frame.shape[1], frame.shape[0])
-                    
+
+                    # Only count fingers inside of the ROI
+                    fingers_up = count_fingers(hand_lms, label, w, h, roi=(xi, yi, xa, ya))
+                                               
                     # Store count for the appropriate hand
                     if label == "Left":
                         left_fingers = fingers_up
@@ -159,9 +312,10 @@ def main():
                                 0.8, (255, 255, 255), 2, cv2.LINE_AA)
             
             #-----------------------------------------------------------------------------------------------------
-            # Gesture recognition
+            # Gesture Recognition
 
             # Only run gesture recognition every 3 frames to improve frame rate without sacrificing much performance.
+            # TODO: change this to only count operation gestures that are inside of the ROI. Right now, the operation can be anywhere in the frame.
             frame_count += 1
             if frame_count % 3 == 0:
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
@@ -247,9 +401,9 @@ def main():
                             1, (255, 0, 0), 2, cv2.LINE_AA)
 
             #-----------------------------------------------------------------------------------------------------
-            # Calculator state machine
+            # Calculator State Machine
             #
-            # State definitions:
+            # State Definitions:
             # 1 - Wait for first number. If stable for stable_required_seconds, accept first_number input.
             # 2 - Wait for operation gesture. If stable for stable_required_seconds, accept operation input.
             # 3 - Wait for second number. If stable for stable_required_seconds, accept second_number input.
@@ -402,7 +556,7 @@ def main():
                         1, (255, 255, 255), 2, cv2.LINE_AA)
 
             # Show the processed frame in window
-            cv2.imshow("Finger Counter", frame)
+            cv2.imshow("ARGZ Gesture-Based Calculator", frame)
 
             # Exit loop when 'q' is pressed or reset calculator when 'r' is pressed
             key = cv2.waitKey(1) & 0xFF
