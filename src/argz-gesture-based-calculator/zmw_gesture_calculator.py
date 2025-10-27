@@ -81,23 +81,6 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height, r
     wrist = lm[0]
 
 
-    """
-    # Count other fingers (index, middle, ring, pinky)
-    # A finger is considered "raised" if its tip landmark is above its PIP joint
-    for tip_idx, pip_idx in zip(FINGER_TIPS, FINGER_PIPS):
-        if lm[tip_idx].y < lm[pip_idx].y: # y decreases as we go up
-            fingers += 1
-
-    # Thumb logic
-    # The thumb moves sideways, so we compare x-coordinates instead of y.
-    if handedness_label == "Right":
-        if lm[THUMB_TIP].x < lm[THUMB_IP].x:
-            fingers += 1
-    else:
-        if lm[THUMB_TIP].x > lm[THUMB_IP].x:
-            fingers += 1
-    """
-
     # Count the number of valid fingers inside of the ROI
     for tip_idx, pip_idx, mcp_idx in zip(FINGER_TIPS, FINGER_PIPS, FINGER_MCPS):
         if not finger_inside_roi([mcp_idx, pip_idx, tip_idx]):
@@ -168,18 +151,6 @@ def main():
     # candidate changes in the calculator state machine.
     def reset_stable(new_candidate, now):
         return new_candidate, now
-
-
-    """
-    # Initialize MediaPipe Hands model
-    with mp_hands.Hands(
-        static_image_mode = False,      # Use video stream (not static images)
-        max_num_hands = 2,              # Detect up to 2 hands
-        model_complexity = 0,           # Using 0 improves frame rate, while 1 improves model accuracy
-        min_detection_confidence = 0.6, # Minimum confidence for detection
-        min_tracking_confidence = 0.6,  # Minimum confidence for tracking
-    ) as hands:
-    """
 
     # Configure models for Pose (used to track body for ROI) and Hands (used to count fingers)
     with mp_pose.Pose(
