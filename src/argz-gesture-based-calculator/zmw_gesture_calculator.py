@@ -161,7 +161,7 @@ def main():
         min_tracking_confidence = 0.5,  # Minimum confidence for tracking
     ) as pose, mp_hands.Hands(
         static_image_mode = False,      # Use video stream (not static images)
-        max_num_hands = 2,              # Detect up to 2 hands (TODO: set this higher and test with multiple sets of hands)
+        max_num_hands = 6,              # Detect up to 6 hands (TODO: test with multiple sets of hands)
         model_complexity = 0,           # 0 improves frame rate, 1 improves model accuracy
         min_detection_confidence = 0.6, # Minimum confidence for detection
         min_tracking_confidence = 0.6,  # Minimum confidence for tracking
