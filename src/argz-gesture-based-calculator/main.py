@@ -369,6 +369,7 @@ def main():
                         right_fingers = fingers_up
 
                     # Draw ONLY index finger landmarks (replaces full hand drawing)
+                    '''
                     for connection in INDEX_FINGER_CONNECTIONS:
                         start_point = hand_lms.landmark[connection[0]]
                         end_point = hand_lms.landmark[connection[1]]
@@ -385,7 +386,7 @@ def main():
                         point_px = mp_drawing._normalized_to_pixel_coordinates(landmark.x, landmark.y, w, h)
                         if point_px:
                             cv2.circle(frame, point_px, 5, (0, 0, 255), -1) # Red dot
-
+                    '''
                     # Get approximate coordinates for the label (near wrist)
                     coords = hand_lms.landmark[0]
                     x_wrist, y_wrist = int(coords.x * frame.shape[1]), int(coords.y * frame.shape[0])
