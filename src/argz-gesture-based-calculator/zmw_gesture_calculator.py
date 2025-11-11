@@ -448,7 +448,7 @@ def main():
             operation_text = None
             gesture_symbol_map = {
                 "Add": "+", 
-                "Subtract": "-", 
+                "Minus": "-", 
                 "Multiply": "*", 
                 "Divide": "/"
             }
@@ -566,7 +566,7 @@ def main():
                 # Perform the desired calculation
                 if operation == "Add":
                     result_value = (first_number + second_number)
-                elif operation == "Subtract":
+                elif operation == "Minus":
                     result_value = (first_number - second_number)
                 elif operation == "Multiply":
                     result_value = (first_number * second_number)

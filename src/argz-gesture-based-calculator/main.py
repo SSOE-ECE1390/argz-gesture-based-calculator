@@ -1,25 +1,119 @@
 import cv2
 import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
-import os, urllib.request
+# Removed imports for MediaPipe's default gesture recognizer
+import os, urllib.request # Kept for potential model download/check
 import time
 import numpy as np
 import math
+import pickle
+from pathlib import Path
 
-# Download default gesture model if it doesn't exist
-if not os.path.exists("gesture_recognizer.task"):
-    print("Downloading default MediaPipe gesture_recognizer.task model...")
-    url = "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task"
-    urllib.request.urlretrieve(url, "gesture_recognizer.task")
-    print("Model downloaded successfully.")
+# --- Configuration for Custom Gesture Classifier ---
+# NOTE: The path to the model file must be correct on your system.
+# The original script used a hardcoded absolute path in the other file, 
+# but for simplicity and to match the file list, we assume it's in the 
+# same directory as this script.
+MODEL_PATH = 'gesture_classifier_model.pkl' 
 
-# Initialize MediaPipe models
+# Index Finger Landmark Indices (5, 6, 7, 8)
+# 5: Index finger base (MCP), 6: PIP, 7: DIP, 8: Tip
+INDEX_FINGER_LANDMARKS = [5, 6, 7, 8] 
+# ---------------------------------------------------
+
+# Initialize MediaPipe drawing utilities
 mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 mp_pose = mp.solutions.pose
 
-# Function for counting fingers
+
+# --- Custom Gesture Classifier Functions (Copied from detect_math_gesture.py) ---
+
+def load_classifier(model_path):
+    """Loads the trained model and label map from the pickle file."""
+    try:
+        with open(model_path, 'rb') as f:
+            data = pickle.load(f)
+            model = data['model']
+            label_map = data['label_map']
+            
+            # Reverse the map for display purposes
+            label_reverse_map = {v: k for k, v in label_map.items()}
+            
+            # We also return the label_map for mapping names to operations later
+            return model, label_reverse_map, label_map 
+    except FileNotFoundError:
+        print(f"Error: Model file not found at {model_path}. Please run training first.")
+        # Exit the application cleanly if the model isn't found
+        exit()
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        exit()
+
+def extract_index_finger_features_single(hand_landmarks):
+    """
+    Extracts and normalizes the 4 index finger landmarks relative to the wrist (landmark 0) 
+    for a single hand, matching the training script logic.
+    
+    Returns: A 12-element numpy array.
+    """
+    # 1. Extract wrist landmark (index 0) for normalization
+    wrist_x = hand_landmarks.landmark[0].x
+    wrist_y = hand_landmarks.landmark[0].y
+    wrist_z = hand_landmarks.landmark[0].z
+    
+    normalized_features = []
+    
+    # 2. Iterate ONLY through the index finger landmarks and normalize
+    for i in INDEX_FINGER_LANDMARKS:
+        landmark = hand_landmarks.landmark[i]
+        
+        # Calculate coordinates relative to the wrist
+        rel_x = landmark.x - wrist_x
+        rel_y = landmark.y - wrist_y
+        rel_z = landmark.z - wrist_z
+        
+        normalized_features.extend([rel_x, rel_y, rel_z])
+
+    return np.array(normalized_features)
+
+
+def extract_dual_index_finger_features(results):
+    """
+    Extracts features for up to two hands (index fingers only).
+    Pads with zeros if only one hand is found, resulting in a 24-element vector.
+
+    Args:
+        results: The MediaPipe hands processing results object.
+
+    Returns:
+        np.array or None: A flattened 24-element feature vector, or None if no hands detected.
+    """
+    all_features = []
+    num_hands_detected = 0
+
+    if results.multi_hand_landmarks:
+        num_hands_detected = len(results.multi_hand_landmarks)
+        
+        # Ensure that if we have more than 2 hands, we only process the first two detected by MediaPipe
+        for i in range(min(2, num_hands_detected)):
+            hand_landmarks = results.multi_hand_landmarks[i]
+            features = extract_index_finger_features_single(hand_landmarks)
+            all_features.append(features)
+    
+    if num_hands_detected == 0:
+        return None
+    
+    # Padding: If only one hand is detected, append 12 zeros for the missing hand
+    if num_hands_detected == 1:
+        # 4 index finger landmarks * 3 coordinates = 12 zero padding elements
+        padding = np.zeros(12, dtype=np.float32) 
+        all_features.append(padding)
+
+    # Concatenate features into a single 24-element vector and reshape for the classifier
+    return np.concatenate(all_features).reshape(1, -1)
+
+
+# --- Original count_fingers function (kept for number input) ---
 def count_fingers(hand_landmarks, handedness_label, image_width, image_height, roi=None):
     """
     Count how many fingers are raised on a given hand using landmark positions.
@@ -105,30 +199,29 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height, r
 # Main loop for live hand tracking and finger counting
 def main():
     
-    # Initialize webcam
     # ** FOR NON-MAC CHANGE to cv2.VideoCapture(0)
     # ** WINDOWS SPECIFIC is cv2.VideoCapture(0, cv2.CAP_DSHOW)
     # ** MAC uses cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    # Using CAP_DSHOW for the provided original script context, adjust if necessary
+    cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
         raise RuntimeError("Webcam error")
 
-    # Set video resolution to 1280x720. Note that lowering the resolution slightly improves performance.
-    #cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    #cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # Set video resolution
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    # Gesture recognizer setup    
-    base_options = python.BaseOptions(model_asset_path="gesture_recognizer.task")
-    options = vision.GestureRecognizerOptions(base_options=base_options)
-    recognizer = vision.GestureRecognizer.create_from_options(options)
+    # --- Custom Classifier Setup ---
+    # Load the trained model and label maps
+    # This replaces the MediaPipe gesture recognizer setup
+    global custom_model, label_reverse_map, label_map
+    custom_model, label_reverse_map, label_map = load_classifier(MODEL_PATH)
+    # -------------------------------
 
     # Initialize variables before use
-    gesture_result = ""
-    most_recent_gesture = ""
-    main.previous_gesture = None
-    frame_count = 0
+    # Removed mediapipe gesture result and frame_count variables
+    most_recent_gesture_id = None
+    main.previous_gesture_id = None 
 
     # Timer used for FPS calculation
     prev_time = time.time()
@@ -141,9 +234,9 @@ def main():
     # State machine variables
     state = 1                      # Current state
     first_number = None            # User's first number input
-    operation = None               # User's operation input
+    operation = None               # User's operation input (will be the gesture name string)
     second_number = None           # User's second number input
-    stable_value = None            # Current candidate being held
+    stable_value = None            # Current candidate being held (either number or gesture name)
     stable_start = None            # Time when candidate first observed
     stable_required_seconds = 5.0  # Time required to "accept" user input
 
@@ -152,19 +245,20 @@ def main():
     def reset_stable(new_candidate, now):
         return new_candidate, now
 
-    # Configure models for Pose (used to track body for ROI) and Hands (used to count fingers)
+    # Configure models for Pose (used to track body for ROI) and Hands (used to count fingers 
+    # and extract features for custom gesture)
     with mp_pose.Pose(
-        static_image_mode = False,      # Use video stream (not static images)
-        model_complexity = 0,           # 0 improves frame rate, 1 improves model accuracy
-        enable_segmentation = False,    # 
-        min_detection_confidence = 0.5, # Minimum confidence for detection
-        min_tracking_confidence = 0.5,  # Minimum confidence for tracking
+        static_image_mode = False,
+        model_complexity = 0,
+        enable_segmentation = False,
+        min_detection_confidence = 0.5,
+        min_tracking_confidence = 0.5,
     ) as pose, mp_hands.Hands(
-        static_image_mode = False,      # Use video stream (not static images)
-        max_num_hands = 6,              # Detect up to 6 hands (TODO: test with multiple sets of hands)
-        model_complexity = 0,           # 0 improves frame rate, 1 improves model accuracy
-        min_detection_confidence = 0.6, # Minimum confidence for detection
-        min_tracking_confidence = 0.6,  # Minimum confidence for tracking
+        static_image_mode = False,
+        max_num_hands = 2,              # Changed to 2 for dual-hand gesture classification
+        model_complexity = 1,           # Increased complexity for better hand tracking/features
+        min_detection_confidence = 0.6, 
+        min_tracking_confidence = 0.6,
     ) as hands:
 
         #-----------------------------------------------------------------------------------------------------
@@ -182,6 +276,8 @@ def main():
             # Convert frame to RGB (MediaPipe expects RGB)
             h, w, _ = frame.shape
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Process Pose for ROI
             pose_results = pose.process(rgb)
             x_min, y_min, x_max, y_max = 0, 0, w, h
 
@@ -206,10 +302,13 @@ def main():
                 base_y_min = max(0, min(l_sh_xy[1], r_sh_xy[1]) - 40)
                 base_y_max = min(h, int((l_hip_xy[1] + r_hip_xy[1]) / 2))
                 y_min, y_max = base_y_min, base_y_max
+            
+            # Process Hands for Landmarks
             rgb.flags.writeable = False
             results = hands.process(rgb)
             rgb.flags.writeable = True
 
+            # Adjust ROI based on hand position
             if results.multi_hand_landmarks:
                 hand_min_y = h
                 hand_max_y = 0
@@ -246,11 +345,14 @@ def main():
 
 
             #--------------------------------------------------------------------------------------------
-            # Finger Counting
+            # Finger Counting / Drawing Hands
 
-            # Initialize finger counts for each hand
             left_fingers = 0
             right_fingers = 0
+
+            # Draw only the Index Finger Landmarks (matching detect_math_gesture.py)
+            INDEX_FINGER_CONNECTIONS = [(5, 6), (6, 7), (7, 8)]
+            INDEX_FINGER_POINTS = INDEX_FINGER_LANDMARKS
 
             # If hands are detected, process each one by classifying as left/right and counting fingers.
             if results.multi_hand_landmarks and results.multi_handedness:
@@ -266,125 +368,119 @@ def main():
                     else:
                         right_fingers = fingers_up
 
-                    # Draw hand landmarks and connections on the frame
-                    mp_drawing.draw_landmarks(
-                        frame,
-                        hand_lms,
-                        mp_hands.HAND_CONNECTIONS,
-                        mp_drawing.DrawingSpec(thickness=2, circle_radius=2),
-                        mp_drawing.DrawingSpec(thickness=2)
-                    )
+                    # Draw ONLY index finger landmarks (replaces full hand drawing)
+                    for connection in INDEX_FINGER_CONNECTIONS:
+                        start_point = hand_lms.landmark[connection[0]]
+                        end_point = hand_lms.landmark[connection[1]]
+                        
+                        start_px = mp_drawing._normalized_to_pixel_coordinates(start_point.x, start_point.y, w, h)
+                        end_px = mp_drawing._normalized_to_pixel_coordinates(end_point.x, end_point.y, w, h)
+
+                        if start_px and end_px:
+                            cv2.line(frame, start_px, end_px, (0, 255, 0), 3) # Green line
+                    
+                    # Draw the index finger points themselves
+                    for i in INDEX_FINGER_POINTS:
+                        landmark = hand_lms.landmark[i]
+                        point_px = mp_drawing._normalized_to_pixel_coordinates(landmark.x, landmark.y, w, h)
+                        if point_px:
+                            cv2.circle(frame, point_px, 5, (0, 0, 255), -1) # Red dot
 
                     # Get approximate coordinates for the label (near wrist)
                     coords = hand_lms.landmark[0]
-                    x, y = int(coords.x * frame.shape[1]), int(coords.y * frame.shape[0])
+                    x_wrist, y_wrist = int(coords.x * frame.shape[1]), int(coords.y * frame.shape[0])
                     cv2.putText(frame, f"{label}: {fingers_up}",
-                                (x - 40, y - 10), cv2.FONT_HERSHEY_SIMPLEX,
+                                (x_wrist - 40, y_wrist - 10), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.8, (255, 255, 255), 2, cv2.LINE_AA)
             
             #-----------------------------------------------------------------------------------------------------
-            # Gesture Recognition
+            # Custom Gesture Classification (Replaces MediaPipe's Gesture Recognizer)
 
-            # Only run gesture recognition every 3 frames to improve frame rate without sacrificing much performance.
-            # TODO: change this to only count operation gestures that are inside of the ROI. Right now, the operation can be anywhere in the frame.
-            frame_count += 1
-            if frame_count % 3 == 0:
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-                gesture_result = recognizer.recognize(mp_image)
-                frame_count = 0
+            # 1. Extract features using the dual-hand logic
+            feature_vector = extract_dual_index_finger_features(results)
+            
+            # 2. Predict the gesture
+            most_recent_gesture_name = None
+            if feature_vector is not None and feature_vector.size == 24:
+                # Predict the gesture ID (0, 1, 2, 3...)
+                prediction_id = custom_model.predict(feature_vector)[0]
+                
+                # Get the gesture name string (e.g., 'Add', 'Subtract')
+                candidate_gesture_name = label_reverse_map.get(prediction_id, 'UNKNOWN')
+                
+                # We need to know the confidence, so we calculate the probability
+                probabilities = custom_model.predict_proba(feature_vector)[0]
+                score = probabilities[prediction_id]
+            else:
+                candidate_gesture_name = None
+                score = 0.0
 
+            # 3. Apply stability logic (modified to use gesture name string)
             # Define the gestures that we should ignore. These will NOT cause the previous gesture to be updated.
-            invalid_gestures_list = {"None", "Victory", "Pointing_Up", "Open_Palm", ""}
+            # Using only 'UNKNOWN' and None from the detection side for invalid candidates
+            invalid_gestures_list = {"UNKNOWN", None} 
 
             # Confidence threshold to detect a new gesture
-            confidence_threshold = 0.60
+            confidence_threshold = 0.60 # Kept original threshold
 
-            # Retrieve persistent previous gesture (may be None initially)
-            previous_gesture = getattr(main, "previous_gesture", None)
+            # Retrieve persistent previous gesture name
+            previous_gesture_name = getattr(main, "previous_gesture_name", None)
 
             # Start by assuming we will keep whatever previous valid gesture we already have
-            most_recent_gesture = previous_gesture
+            most_recent_gesture_name = previous_gesture_name
 
-            # Extract the top gesture and see if it is valid. I think this try/exception is necessary to prevent
-            # crashing if there isn't a valid gesture.
-            candidate = None
-            if gesture_result and getattr(gesture_result, "gestures", None):
-                try:
-                    candidate = gesture_result.gestures[0][0]
-                except Exception:
-                    candidate = None
+            # If we got a valid candidate gesture
+            if candidate_gesture_name not in invalid_gestures_list and score >= confidence_threshold:
+                main.previous_gesture_name = candidate_gesture_name
+                most_recent_gesture_name = candidate_gesture_name
+            else:
+                # If the candidate is invalid, keep the previous valid gesture
+                most_recent_gesture_name = previous_gesture_name
 
-            # If we were able to get a valid candidate gesture, then read and validate it.
-            if candidate is not None:
-                category_name = getattr(candidate, "category_name", None)
-                score = getattr(candidate, "score", 0.0)
-
-                # Check what type of gesture was detected and the confidence to determine whether we should use it.
-                # At this point, we also need to ignore certain gestures based on our list.
-                if ((category_name is not None) and (str(category_name) not in invalid_gestures_list) and 
-                    (score >= confidence_threshold)):
-                    main.previous_gesture = candidate
-                    most_recent_gesture = candidate
-                else:
-                    # If the candidate is invalid, do NOT overwrite the previous valid gesture
-                    most_recent_gesture = previous_gesture
 
             # Format gesture output text
-            if ((most_recent_gesture is not None) and
-                (getattr(most_recent_gesture, "category_name", None) not in invalid_gestures_list)):
-
-                # Format score and add to output text with gesture
-                score = getattr(most_recent_gesture, "score", 0.0)
-                gesture_text = f"{most_recent_gesture.category_name} ({score:.2f})"
+            if most_recent_gesture_name is not None and most_recent_gesture_name != "UNKNOWN":
+                gesture_text = f"Gesture: {most_recent_gesture_name} (Score: {score:.2f})"
             else:
-                # At startup, we will be waiting for the first operation gesture from the user.
-                gesture_text = "Waiting for operation"
+                gesture_text = "Waiting for operation gesture"
 
-            # Get the previous gesture name, if there is one
-            remembered_name = None
-            if (getattr(main, "previous_gesture", None) is not None):
-                remembered_name = getattr(getattr(main, "previous_gesture", None), "category_name", None)
-
-            # Addition - "Thumb_Up"
-            # Subtraction - "Thumb_Down"
-            # Multiplication - "Closed_Fist"
-            # Division - "ILoveYou", the Spiderman gesture
-            if remembered_name:
-                if "Thumb_Up" in remembered_name:
-                    operation_text = "Addition"
-                elif "Thumb_Down" in remembered_name:
-                    operation_text = "Subtraction"
-                elif "Closed_Fist" in remembered_name:
-                    operation_text = "Multiplication"
-                elif "ILoveYou" in remembered_name:
-                    operation_text = "Division"
+            # Map the custom gesture names to operation symbols and longer text
+            operation_text = None
+            gesture_symbol_map = {
+                "Add": "+", 
+                "Minus": "-", 
+                "Multiply": "*", 
+                "Divide": "/"
+            }
+            
+            # Get the operation text/name for display/state machine
+            if most_recent_gesture_name in gesture_symbol_map:
+                operation_text = most_recent_gesture_name
             else:
-                operation_text = None
+                 operation_text = "None" # For clearer display if we have a hand but no classified gesture
+
 
             # Display gesture result and the corresponding operation, if there is one
             cv2.rectangle(frame, (10, 10), (600, 150), (0, 0, 0), -1)
             cv2.putText(frame, gesture_text,
                         (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
                         1, (255, 0, 0), 2, cv2.LINE_AA)
-            if (operation_text is not None):
-                cv2.putText(frame, f"{operation_text}",
-                            (350, 40), cv2.FONT_HERSHEY_SIMPLEX,
+            if (operation_text is not None) and (operation_text != "None"):
+                cv2.putText(frame, f"Operation: {operation_text}",
+                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 0, 0), 2, cv2.LINE_AA)
+            else:
+                cv2.putText(frame, f"Operation: None",
+                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            1, (255, 0, 0), 2, cv2.LINE_AA)
+
 
             #-----------------------------------------------------------------------------------------------------
             # Calculator State Machine
-            #
-            # State Definitions:
-            # 1 - Wait for first number. If stable for stable_required_seconds, accept first_number input.
-            # 2 - Wait for operation gesture. If stable for stable_required_seconds, accept operation input.
-            # 3 - Wait for second number. If stable for stable_required_seconds, accept second_number input.
-            # 4 - Show calculation result until 'r' is pressed, then reset to state 1
-
+            
             # Current candidate values
             candidate_number = (left_fingers + right_fingers)  # fingers held up between left and right hands, 0-10
-            candidate_gesture_name = None
-            if (most_recent_gesture is not None) and (getattr(most_recent_gesture, "category_name", None) not in invalid_gestures_list):
-                candidate_gesture_name = getattr(most_recent_gesture, "category_name", None)
+            candidate_gesture_name = most_recent_gesture_name
 
             # Save the time before running the state machine for this frame
             now = time.time()
@@ -393,7 +489,7 @@ def main():
             if (state == 1):
                 # Display prompt
                 cv2.putText(frame, f"Enter the first operand",
-                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Initialize stable value if it's currently None
@@ -417,11 +513,11 @@ def main():
             elif (state == 2):
                 # Display prompt
                 cv2.putText(frame, f"Enter the desired operation",
-                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Initialize stable value if it's currently None
-                if ((stable_value is None) and (candidate_gesture_name is not None)):
+                if ((stable_value is None) and (candidate_gesture_name not in invalid_gestures_list)):
                     stable_value, stable_start = reset_stable(candidate_gesture_name, now)
 
                 # If the candidate gesture changed, restart the timer
@@ -441,7 +537,7 @@ def main():
             elif state == 3:
                 # Waiting for second number
                 cv2.putText(frame, f"Enter the second operand",
-                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Initialize stable value if it's currently None
@@ -461,20 +557,20 @@ def main():
             elif state == 4:
                 # Display program completion text
                 cv2.putText(frame, f"Calculation complete.",
-                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
                 cv2.putText(frame, f"Press 'r' to restart the calculator.",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Perform the desired calculation
-                if "Thumb_Up" in operation:
+                if operation == "Add":
                     result_value = (first_number + second_number)
-                elif "Thumb_Down" in operation:
+                elif operation == "Minus":
                     result_value = (first_number - second_number)
-                elif "Closed_Fist" in operation:
+                elif operation == "Multiply":
                     result_value = (first_number * second_number)
-                elif "ILoveYou" in operation:
+                elif operation == "Divide":
                     if second_number == 0:
                         result_value = "Divide by zero"
                     else:
@@ -483,24 +579,24 @@ def main():
                     result_value = "ERROR"
 
                 # Map the gesture names to operation symbols for displaying them
-                gesture_symbol_map = {"Thumb_Up": "+", "Thumb_Down": "-", "Closed_Fist": "*", "ILoveYou": "/"}
+                # Reuse the symbol map defined earlier
                 
                 # Display calculation with result on frame
                 cv2.putText(frame, f"{first_number} {gesture_symbol_map.get(operation, operation)} {second_number} = {result_value}",
-                            (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 160), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (0, 255, 255), 2, cv2.LINE_AA)
 
             # Display the current number and a countdown timer if in state 1 or 3
-            if ((state == 1) or (state ==3)):
+            if ((state == 1) or (state == 3)):
                 # Show candidate number and countdown
                 if (stable_start is not None):
-                    remaining = (stable_required_seconds - (now - stable_start))
+                    remaining = max(0, stable_required_seconds - (now - stable_start))
                 else:
                     remaining = stable_required_seconds
                 
                 # Display info on frame
                 cv2.putText(frame, f"Input: {candidate_number}  Timer: {remaining:.1f} sec",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
             
             # Display the current operation and a countdown timer if in state 2
@@ -513,7 +609,7 @@ def main():
 
                 # Display info on frame
                 cv2.putText(frame, f"Input: {candidate_gesture_name}  Timer: {remaining:.1f} sec",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
             
             #-----------------------------------------------------------------------------------------------------
@@ -541,6 +637,8 @@ def main():
                 stable_value = None
                 stable_start = None
                 state = 1
+                # Reset gesture tracking
+                main.previous_gesture_name = None
 
     # Release camera and close window
     cap.release()
