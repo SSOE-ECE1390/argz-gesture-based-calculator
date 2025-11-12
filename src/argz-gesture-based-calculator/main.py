@@ -8,6 +8,7 @@ import pickle
 from pathlib import Path
 
 # The path to the model file must be in the same directory as this script.
+# Must also pip install scikit-learn
 MODEL_PATH = 'gesture_classifier_model.pkl' 
 
 # Index Finger Landmark Indices (5, 6, 7, 8)
@@ -196,7 +197,7 @@ def main():
     # ** FOR NON-MAC CHANGE to cv2.VideoCapture(0)
     # ** WINDOWS SPECIFIC is cv2.VideoCapture(0, cv2.CAP_DSHOW)
     # ** MAC uses cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
-    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
         raise RuntimeError("Webcam error")
 
@@ -246,8 +247,8 @@ def main():
         min_tracking_confidence = 0.5,
     ) as pose, mp_hands.Hands(
         static_image_mode = False,
-        max_num_hands = 2,              # Changed to 2 for dual-hand gesture classification
-        model_complexity = 1,           # Increased complexity for better hand tracking/features
+        max_num_hands = 2,              # Define number of hands used for gesture classification
+        model_complexity = 1,           # 0 improves frame rate, 1 improves model accuracy
         min_detection_confidence = 0.6, 
         min_tracking_confidence = 0.6,
     ) as hands:
@@ -440,7 +441,7 @@ def main():
             operation_text = None
             gesture_symbol_map = {
                 "Add": "+", 
-                "Minus": "-", 
+                "Subtract": "-", 
                 "Multiply": "*", 
                 "Divide": "/"
             }
@@ -558,7 +559,7 @@ def main():
                 # Perform the desired calculation
                 if operation == "Add":
                     result_value = (first_number + second_number)
-                elif operation == "Minus":
+                elif operation == "Subtract":
                     result_value = (first_number - second_number)
                 elif operation == "Multiply":
                     result_value = (first_number * second_number)
