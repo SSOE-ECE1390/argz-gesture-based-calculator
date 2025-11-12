@@ -1,7 +1,6 @@
 import cv2
 import mediapipe as mp
-# Removed imports for MediaPipe's default gesture recognizer
-import os, urllib.request # Kept for potential model download/check
+import os, urllib.request
 import time
 import numpy as np
 import math
@@ -11,11 +10,8 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
 
-# --- Configuration for Custom Gesture Classifier ---
-# NOTE: The path to the model file must be correct on your system.
-# The original script used a hardcoded absolute path in the other file, 
-# but for simplicity and to match the file list, we assume it's in the 
-# same directory as this script.
+# The path to the model file must be in the same directory as this script.
+# Must also pip install scikit-learn
 MODEL_PATH = 'gesture_classifier_model.pkl' 
 
 # Index Finger Landmark Indices (5, 6, 7, 8)
@@ -30,7 +26,6 @@ mp_pose = mp.solutions.pose
 
 
 # --- Custom Gesture Classifier Functions (Copied from detect_math_gesture.py) ---
-
 def load_classifier(model_path):
     """Loads the trained model and label map from the pickle file."""
     try:
@@ -59,14 +54,14 @@ def extract_index_finger_features_single(hand_landmarks):
     
     Returns: A 12-element numpy array.
     """
-    # 1. Extract wrist landmark (index 0) for normalization
+    # Extract wrist landmark (index 0) for normalization
     wrist_x = hand_landmarks.landmark[0].x
     wrist_y = hand_landmarks.landmark[0].y
     wrist_z = hand_landmarks.landmark[0].z
     
     normalized_features = []
     
-    # 2. Iterate ONLY through the index finger landmarks and normalize
+    # Iterate ONLY through the index finger landmarks and normalize
     for i in INDEX_FINGER_LANDMARKS:
         landmark = hand_landmarks.landmark[i]
         
@@ -235,7 +230,6 @@ def main():
     # ** FOR NON-MAC CHANGE to cv2.VideoCapture(0)
     # ** WINDOWS SPECIFIC is cv2.VideoCapture(0, cv2.CAP_DSHOW)
     # ** MAC uses cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
-    # Using CAP_DSHOW for the provided original script context, adjust if necessary
     cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
         raise RuntimeError("Webcam error")
@@ -244,9 +238,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    # --- Custom Classifier Setup ---
     # Load the trained model and label maps
-    # This replaces the MediaPipe gesture recognizer setup
     global custom_model, label_reverse_map, label_map
     custom_model, label_reverse_map, label_map = load_classifier(MODEL_PATH)
     # -------------------------------
@@ -288,8 +280,8 @@ def main():
         min_tracking_confidence = 0.5,
     ) as pose, mp_hands.Hands(
         static_image_mode = False,
-        max_num_hands = 2,              # Changed to 2 for dual-hand gesture classification
-        model_complexity = 1,           # Increased complexity for better hand tracking/features
+        max_num_hands = 2,              # Define number of hands used for gesture classification
+        model_complexity = 1,           # 0 improves frame rate, 1 improves model accuracy
         min_detection_confidence = 0.6, 
         min_tracking_confidence = 0.6,
     ) as hands:
@@ -401,8 +393,8 @@ def main():
                     else:
                         right_fingers = fingers_up
 
-                    # Draw ONLY index finger landmarks (replaces full hand drawing)
-                    '''
+                    # Do not display finger outline in order to improve performance
+                    """
                     for connection in INDEX_FINGER_CONNECTIONS:
                         start_point = hand_lms.landmark[connection[0]]
                         end_point = hand_lms.landmark[connection[1]]
@@ -419,7 +411,7 @@ def main():
                         point_px = mp_drawing._normalized_to_pixel_coordinates(landmark.x, landmark.y, w, h)
                         if point_px:
                             cv2.circle(frame, point_px, 5, (0, 0, 255), -1) # Red dot
-                    '''
+                    """
                     # Get approximate coordinates for the label (near wrist)
                     coords = hand_lms.landmark[0]
                     x_wrist, y_wrist = int(coords.x * frame.shape[1]), int(coords.y * frame.shape[0])
@@ -428,12 +420,12 @@ def main():
                                 0.8, (255, 255, 255), 2, cv2.LINE_AA)
             
             #-----------------------------------------------------------------------------------------------------
-            # Custom Gesture Classification (Replaces MediaPipe's Gesture Recognizer)
+            # Gesture Classification
 
-            # 1. Extract features using the dual-hand logic
+            # Extract features using the dual-hand logic
             feature_vector = extract_dual_index_finger_features(results)
             
-            # 2. Predict the gesture
+            # Predict the gesture
             most_recent_gesture_name = None
             if feature_vector is not None and feature_vector.size == 24:
                 # Predict the gesture ID (0, 1, 2, 3...)
@@ -449,7 +441,7 @@ def main():
                 candidate_gesture_name = None
                 score = 0.0
 
-            # 3. Apply stability logic (modified to use gesture name string)
+            # Apply stability logic (modified to use gesture name string)
             # Define the gestures that we should ignore. These will NOT cause the previous gesture to be updated.
             # Using only 'UNKNOWN' and None from the detection side for invalid candidates
             invalid_gestures_list = {"UNKNOWN", None} 
@@ -482,7 +474,7 @@ def main():
             operation_text = None
             gesture_symbol_map = {
                 "Add": "+", 
-                "Minus": "-", 
+                "Subtract": "-", 
                 "Multiply": "*", 
                 "Divide": "/"
             }
@@ -495,7 +487,7 @@ def main():
 
 
             # Display gesture result and the corresponding operation, if there is one
-            cv2.rectangle(frame, (10, 10), (600, 150), (0, 0, 0), -1)
+            cv2.rectangle(frame, (10, 10), (600, 170), (0, 0, 0), -1)
             cv2.putText(frame, gesture_text,
                         (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
                         1, (255, 0, 0), 2, cv2.LINE_AA)
@@ -522,7 +514,7 @@ def main():
             # State 1: Get first number input
             if (state == 1):
                 # Display prompt
-                cv2.putText(frame, f"Enter the first operand",
+                cv2.putText(frame, f"Enter the first number",
                             (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
@@ -570,7 +562,7 @@ def main():
             # State 3: Get second number input
             elif state == 3:
                 # Waiting for second number
-                cv2.putText(frame, f"Enter the second operand",
+                cv2.putText(frame, f"Enter the second number",
                             (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
@@ -600,7 +592,7 @@ def main():
                 # Perform the desired calculation
                 if operation == "Add":
                     result_value = (first_number + second_number)
-                elif operation == "Minus":
+                elif operation == "Subtract":
                     result_value = (first_number - second_number)
                 elif operation == "Multiply":
                     result_value = (first_number * second_number)
