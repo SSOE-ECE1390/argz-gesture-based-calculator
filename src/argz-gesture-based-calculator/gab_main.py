@@ -7,9 +7,6 @@ import numpy as np
 import math
 import pickle
 from pathlib import Path
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
-
 
 # --- Configuration for Custom Gesture Classifier ---
 # NOTE: The path to the model file must be correct on your system.
@@ -198,6 +195,7 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height, r
             fingers += 1
 
     return fingers
+# --------------------------------------------------------------------------------
 # 3D solution -between hands
 def draw_3d_result(frame, results, result_value):
 
@@ -227,7 +225,6 @@ def draw_3d_result(frame, results, result_value):
  
     cv2.putText(frame, str(result_value), (px - 60, py),
                 cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 255, 255), 4, cv2.LINE_AA)
-
 
 # Main loop for live hand tracking and finger counting
 def main():
@@ -619,10 +616,7 @@ def main():
                 cv2.putText(frame, f"{first_number} {gesture_symbol_map.get(operation, operation)} {second_number} = {result_value}",
                             (20, 160), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (0, 255, 255), 2, cv2.LINE_AA)
-                
-             # Draw the floating result between hands
-                draw_3d_result(frame, results, result_value)
-            
+
             # Display the current number and a countdown timer if in state 1 or 3
             if ((state == 1) or (state == 3)):
                 # Show candidate number and countdown

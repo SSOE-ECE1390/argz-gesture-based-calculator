@@ -6,17 +6,6 @@ mp_drawing = mp.solutions.drawing_utils
 mp_hands = mp.solutions.hands
 
 def count_fingers(hand_landmarks, handedness_label, image_width, image_height):
-    """
-    Count how many fingers are raised on a given hand using landmark positions.
-
-    Args:
-        hand_landmarks: The 21 hand landmarks detected by MediaPipe.
-        handedness_label: 'Left' or 'Right' (determined by MediaPipe).
-        image_width, image_height: Dimensions of the current video frame.
-
-    Returns:
-        The number of fingers currently detected as being raised (0-5).
-    """
 
     # Indices of relevant landmarks in MediaPipe's hand model
     lm = hand_landmarks.landmark
