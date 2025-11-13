@@ -11,7 +11,7 @@ from mediapipe.tasks.python import vision
 
 
 # The path to the model file must be in the same directory as this script.
-# Must also pip install scikit-learn
+# May also need to pip install scikit-learn
 MODEL_PATH = 'gesture_classifier_model.pkl' 
 
 # Index Finger Landmark Indices (5, 6, 7, 8)
@@ -25,7 +25,7 @@ mp_hands = mp.solutions.hands
 mp_pose = mp.solutions.pose
 
 
-# --- Custom Gesture Classifier Functions (Copied from detect_math_gesture.py) ---
+# Custom Gesture Classifier Functions (from detect_math_gesture.py)
 def load_classifier(model_path):
     """Loads the trained model and label map from the pickle file."""
     try:
@@ -111,7 +111,6 @@ def extract_dual_index_finger_features(results):
     return np.concatenate(all_features).reshape(1, -1)
 
 
-# --- Original count_fingers function (kept for number input) ---
 def count_fingers(hand_landmarks, handedness_label, image_width, image_height, roi=None):
     """
     Count how many fingers are raised on a given hand using landmark positions.
@@ -193,7 +192,8 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height, r
             fingers += 1
 
     return fingers
-# 3D solution -between hands
+
+# Function to display the output on the frame between the user's hands
 def draw_3d_result(frame, results, result_value):
 
 
@@ -212,7 +212,7 @@ def draw_3d_result(frame, results, result_value):
     px, py = int(mid_x * w), int(mid_y * h)
 
 
-    scale = max(0.6, 2.0 - abs(mid_z) * 4.0)
+    scale = max(1.0, 2.0 - abs(mid_z) * 4.0)
 
    
     for offset in range(3):
@@ -244,7 +244,6 @@ def main():
     # -------------------------------
 
     # Initialize variables before use
-    # Removed mediapipe gesture result and frame_count variables
     most_recent_gesture_id = None
     main.previous_gesture_id = None 
 
@@ -393,7 +392,7 @@ def main():
                     else:
                         right_fingers = fingers_up
 
-                    # Do not display finger outline in order to improve performance
+                    # Do not display hand outlines in order to improve performance
                     """
                     for connection in INDEX_FINGER_CONNECTIONS:
                         start_point = hand_lms.landmark[connection[0]]
@@ -441,13 +440,12 @@ def main():
                 candidate_gesture_name = None
                 score = 0.0
 
-            # Apply stability logic (modified to use gesture name string)
             # Define the gestures that we should ignore. These will NOT cause the previous gesture to be updated.
-            # Using only 'UNKNOWN' and None from the detection side for invalid candidates
+            # Using only 'UNKNOWN' and None for invalid candidates
             invalid_gestures_list = {"UNKNOWN", None} 
 
             # Confidence threshold to detect a new gesture
-            confidence_threshold = 0.60 # Kept original threshold
+            confidence_threshold = 0.60
 
             # Retrieve persistent previous gesture name
             previous_gesture_name = getattr(main, "previous_gesture_name", None)
@@ -491,6 +489,10 @@ def main():
             cv2.putText(frame, gesture_text,
                         (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
                         1, (255, 0, 0), 2, cv2.LINE_AA)
+            
+            # Now that we have mapped the gestures to math operations we don't need to display the
+            # operation_text anymore, but I'm leaving it commented out just in case.
+            """
             if (operation_text is not None) and (operation_text != "None"):
                 cv2.putText(frame, f"Operation: {operation_text}",
                             (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
@@ -499,7 +501,7 @@ def main():
                 cv2.putText(frame, f"Operation: None",
                             (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 0, 0), 2, cv2.LINE_AA)
-
+            """
 
             #-----------------------------------------------------------------------------------------------------
             # Calculator State Machine
@@ -515,7 +517,7 @@ def main():
             if (state == 1):
                 # Display prompt
                 cv2.putText(frame, f"Enter the first number",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 80), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Initialize stable value if it's currently None
@@ -539,7 +541,7 @@ def main():
             elif (state == 2):
                 # Display prompt
                 cv2.putText(frame, f"Enter the desired operation",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 80), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Initialize stable value if it's currently None
@@ -563,7 +565,7 @@ def main():
             elif state == 3:
                 # Waiting for second number
                 cv2.putText(frame, f"Enter the second number",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 80), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Initialize stable value if it's currently None
@@ -583,10 +585,10 @@ def main():
             elif state == 4:
                 # Display program completion text
                 cv2.putText(frame, f"Calculation complete.",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 80), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
                 cv2.putText(frame, f"Press 'r' to restart the calculator.",
-                            (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 110), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
 
                 # Perform the desired calculation
@@ -609,7 +611,7 @@ def main():
                 
                 # Display calculation with result on frame
                 cv2.putText(frame, f"{first_number} {gesture_symbol_map.get(operation, operation)} {second_number} = {result_value}",
-                            (20, 160), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 150), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (0, 255, 255), 2, cv2.LINE_AA)
                 
              # Draw the floating result between hands
@@ -625,7 +627,7 @@ def main():
                 
                 # Display info on frame
                 cv2.putText(frame, f"Input: {candidate_number}  Timer: {remaining:.1f} sec",
-                            (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 110), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
             
             # Display the current operation and a countdown timer if in state 2
@@ -638,7 +640,7 @@ def main():
 
                 # Display info on frame
                 cv2.putText(frame, f"Input: {candidate_gesture_name}  Timer: {remaining:.1f} sec",
-                            (20, 130), cv2.FONT_HERSHEY_SIMPLEX,
+                            (20, 110), cv2.FONT_HERSHEY_SIMPLEX,
                             1, (255, 255, 255), 2, cv2.LINE_AA)
             
             #-----------------------------------------------------------------------------------------------------
