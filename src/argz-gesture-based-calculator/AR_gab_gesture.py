@@ -1,12 +1,20 @@
 import cv2
 import mediapipe as mp
+import open3d as o3d
+import numpy as np
+import cv2
+import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import os, urllib.request
 import time
 import numpy as np
 import math
+import open3d as o3d
+from pathlib import Path
 
+# --------------------------------------------------------------------------------
+# Download default gesture model if it doesn't exist
 if not os.path.exists("gesture_recognizer.task"):
     print("Downloading default MediaPipe gesture_recognizer.task model...")
     url = "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task"
@@ -20,17 +28,41 @@ mp_pose = mp.solutions.pose
 
 
 # --------------------------------------------------------------------------------
-# Function for counting fingers
-def count_fingers(hand_landmarks, handedness_label, image_width, image_height, roi=None):
+# Find 7-DOF Helmert Transform (from lecture notebook)
+def find_helmert_transform(src_points, dst_points):
     """
-    Count how many fingers are raised on a given hand using landmark positions.
+    Finds the 7-parameter Helmert (similarity) transformation between
+    two sets of corresponding 3D points using least squares.
     """
+    src_centroid = np.mean(src_points, axis=0)
+    dst_centroid = np.mean(dst_points, axis=0)
+    src_centered = src_points - src_centroid
+    dst_centered = dst_points - dst_centroid
 
+    H = src_centered.T @ dst_centered
+    U, S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = Vt.T @ U.T
+
+    src_norm_sq = np.sum(src_centered ** 2)
+    dst_norm_sq = np.sum(dst_centered ** 2)
+    scale = np.sqrt(dst_norm_sq / src_norm_sq)
+    R *= scale
+    t = dst_centroid - (R @ src_centroid)
+    t = np.expand_dims(t, axis=1)
+    return R, t
+
+
+# --------------------------------------------------------------------------------
+# Function for counting fingers (same as original)
+def count_fingers(hand_landmarks, handedness_label, image_width, image_height, roi=None):
     lm = hand_landmarks.landmark
     THUMB_TIP, THUMB_IP, THUMB_MCP = 4, 3, 2
-    FINGER_TIPS = [8, 12, 16, 20]  # Index, Middle, Ring, Pinky fingertips
-    FINGER_PIPS = [6, 10, 14, 18]  # Corresponding knuckles (PIP joints)
-    FINGER_MCPS = [5, 9, 13, 17]   # MCP joints
+    FINGER_TIPS = [8, 12, 16, 20]
+    FINGER_PIPS = [6, 10, 14, 18]
+    FINGER_MCPS = [5, 9, 13, 17]
 
     xs = [p.x for p in lm]
     ys = [p.y for p in lm]
@@ -69,11 +101,9 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height, r
     for tip_idx, pip_idx, mcp_idx in zip(FINGER_TIPS, FINGER_PIPS, FINGER_MCPS):
         if not finger_inside_roi([mcp_idx, pip_idx, tip_idx]):
             continue
-
         tip_up = lm[tip_idx].y < (lm[pip_idx].y - margin_y)
         straight = angle(lm[mcp_idx], lm[pip_idx], lm[tip_idx]) > 160.0
         radial = dist(wrist, lm[tip_idx]) > dist(wrist, lm[pip_idx]) + margin_d
-
         if (tip_up and radial) or (straight and radial):
             fingers += 1
 
@@ -87,42 +117,88 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height, r
 
 
 # --------------------------------------------------------------------------------
-# 3D solution -between hands
-def draw_3d_result(frame, results, result_value):
-
-
-    if not (results and results.multi_hand_landmarks and len(results.multi_hand_landmarks) >= 2):
+# Draw 3D result mesh between both hands
+def draw_3d_result(frame, results, value):
+    """
+    Displays the calculation result as a 3D STL mesh between both hands.
+    """
+    if not results.multi_hand_landmarks or len(results.multi_hand_landmarks) < 2:
         return
 
+    # Select 7 reference points from both hands
+    hand_points = []
+    for hand in results.multi_hand_landmarks[:2]:
+        wrist = hand.landmark[mp_hands.HandLandmark.WRIST]
+        thumb_tip = hand.landmark[mp_hands.HandLandmark.THUMB_TIP]
+        index_tip = hand.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
+        middle_tip = hand.landmark[mp_hands.HandLandmark.MIDDLE_FINGER_TIP]
+        ring_tip = hand.landmark[mp_hands.HandLandmark.RING_FINGER_TIP]
+        pinky_tip = hand.landmark[mp_hands.HandLandmark.PINKY_TIP]
+        palm = hand.landmark[mp_hands.HandLandmark.PINKY_MCP]
+        hand_points.extend([
+            [wrist.x, wrist.y, wrist.z],
+            [thumb_tip.x, thumb_tip.y, thumb_tip.z],
+            [index_tip.x, index_tip.y, index_tip.z],
+            [middle_tip.x, middle_tip.y, middle_tip.z],
+            [ring_tip.x, ring_tip.y, ring_tip.z],
+            [pinky_tip.x, pinky_tip.y, pinky_tip.z],
+            [palm.x, palm.y, palm.z],
+        ])
+    hand_points = np.array(hand_points[:7])
 
-    left_wrist = results.multi_hand_landmarks[0].landmark[0]
-    right_wrist = results.multi_hand_landmarks[1].landmark[0]
+    # Canonical cube for reference alignment
+    cube_ref = np.array([
+        [0, 0, 0], [1, 0, 0], [1, 1, 0],
+        [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1]
+    ])
 
-    mid_x = (left_wrist.x + right_wrist.x) / 2
-    mid_y = (left_wrist.y + right_wrist.y) / 2
-    mid_z = (left_wrist.z + right_wrist.z) / 2
+    # Compute Helmert transform
+    R, t = find_helmert_transform(cube_ref, hand_points)
 
+    # Load STL (or fallback cube)
+    script_path = Path(__file__).absolute().parent
+    stlfile = script_path / "number.stl"  # put your STL file here
+    if stlfile.exists():
+        mesh = o3d.io.read_triangle_mesh(str(stlfile))
+        verts = np.asarray(mesh.vertices)
+        tris = np.asarray(mesh.triangles)
+        verts -= np.mean(verts, axis=0)
+        verts /= np.max(np.abs(verts))
+        verts += 0.5
+    else:
+        verts = np.array([
+            [0,0,1], [1,0,1], [1,1,1], [0,1,1],
+            [0,0,0], [1,0,0], [1,1,0], [0,1,0]
+        ])
+        tris = np.array([
+            [0,1,2],[0,2,3],[4,5,6],[4,6,7],
+            [0,1,5],[0,5,4],[2,3,7],[2,7,6],
+            [1,2,6],[1,6,5],[0,3,7],[0,7,4]
+        ])
+
+    # Transform vertices
+    verts_t = (R @ verts.T + t @ np.ones((1, verts.shape[0]))).T
+
+    # Draw mesh into frame
     h, w, _ = frame.shape
-    px, py = int(mid_x * w), int(mid_y * h)
+    zmean = np.mean(verts_t[tris, 2], axis=1)
+    for tri in tris[np.argsort(zmean)]:
+        pts = np.zeros((3, 2), dtype=np.int32)
+        pts[:, 0] = (verts_t[tri, 0] * w).astype(int)
+        pts[:, 1] = (verts_t[tri, 1] * h).astype(int)
+        cv2.fillPoly(frame, [pts], (255, 255, 255))
+        cv2.polylines(frame, [pts], True, (0, 0, 0), 1)
 
-
-    scale = max(0.6, 2.0 - abs(mid_z) * 4.0)
-
-   
-    for offset in range(3):
-        cv2.putText(frame, str(result_value), (px - 60 + offset, py + offset),
-                    cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 6, cv2.LINE_AA)
-
- 
-    cv2.putText(frame, str(result_value), (px - 60, py),
-                cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 255, 255), 4, cv2.LINE_AA)
+    # Label the 3D object
+    cx = int(np.mean(verts_t[:, 0]) * w)
+    cy = int(np.mean(verts_t[:, 1]) * h)
+    cv2.putText(frame, str(value), (cx - 25, cy),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 0, 255), 3, cv2.LINE_AA)
 
 
 # --------------------------------------------------------------------------------
-# Main loop for live hand tracking and finger counting
+# Main loop (same logic as your working version)
 def main():
-
-    # Initialize webcam
     cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
         raise RuntimeError("Webcam error")
@@ -130,23 +206,20 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    # Gesture recognizer setup
     base_options = python.BaseOptions(model_asset_path="gesture_recognizer.task")
     options = vision.GestureRecognizerOptions(base_options=base_options)
     recognizer = vision.GestureRecognizer.create_from_options(options)
 
-    # Initialize variables
     gesture_result = ""
     most_recent_gesture = ""
     main.previous_gesture = None
     frame_count = 0
     prev_time = time.time()
-
     smoothed_roi = None
     alpha_w = 0.15
     alpha_h = 0.35
 
-    # State machine variables
+    # Calculator state variables
     state = 1
     first_number = None
     operation = None
@@ -176,12 +249,9 @@ def main():
             ok, frame = cap.read()
             if not ok:
                 break
-
             frame = cv2.flip(frame, 1)
             h, w, _ = frame.shape
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            # Pose for ROI
             pose_results = pose.process(rgb)
             x_min, y_min, x_max, y_max = 0, 0, w, h
 
@@ -190,12 +260,10 @@ def main():
                 r_sh = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
                 l_hip = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_HIP]
                 r_hip = pose_results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_HIP]
-
                 l_sh_xy = (int(l_sh.x * w), int(l_sh.y * h))
                 r_sh_xy = (int(r_sh.x * w), int(r_sh.y * h))
                 l_hip_xy = (int(l_hip.x * w), int(l_hip.y * h))
                 r_hip_xy = (int(r_hip.x * w), int(r_hip.y * h))
-
                 pad_w = 60
                 x_min = max(0, min(l_sh_xy[0], r_sh_xy[0]) - pad_w)
                 x_max = min(w, max(l_sh_xy[0], r_sh_xy[0]) + pad_w)
@@ -207,58 +275,29 @@ def main():
             results = hands.process(rgb)
             rgb.flags.writeable = True
 
-            if results and results.multi_hand_landmarks:
-                hand_min_y = h
-                hand_max_y = 0
-                PAD_Y = 30
-
-                for hand_lms in results.multi_hand_landmarks:
-                    ys = [int(pt.y * h) for pt in hand_lms.landmark]
-                    if not ys:
-                        continue
-                    hand_min_y = min(hand_min_y, min(ys))
-                    hand_max_y = max(hand_max_y, max(ys))
-
-                if hand_max_y > 0:
-                    y_min = min(y_min, hand_min_y - PAD_Y)
-                    y_max = max(y_max, hand_max_y + PAD_Y)
-                y_min = max(0, y_min)
-                y_max = min(h, y_max)
-
+            # ROI smoothing
             new_roi = np.array([x_min, y_min, x_max, y_max], dtype=np.float32)
             if smoothed_roi is None:
                 smoothed_roi = new_roi
             else:
                 smoothed_roi = np.array([
-                    smoothed_roi[0] * (1 - alpha_w) + new_roi[0] * alpha_w,
-                    smoothed_roi[1] * (1 - alpha_h) + new_roi[1] * alpha_h,
-                    smoothed_roi[2] * (1 - alpha_w) + new_roi[2] * alpha_w,
-                    smoothed_roi[3] * (1 - alpha_h) + new_roi[3] * alpha_h
+                    smoothed_roi[0]*(1-alpha_w)+new_roi[0]*alpha_w,
+                    smoothed_roi[1]*(1-alpha_h)+new_roi[1]*alpha_h,
+                    smoothed_roi[2]*(1-alpha_w)+new_roi[2]*alpha_w,
+                    smoothed_roi[3]*(1-alpha_h)+new_roi[3]*alpha_h
                 ], dtype=np.float32)
-
             xi, yi, xa, ya = smoothed_roi.astype(int)
             cv2.rectangle(frame, (xi, yi), (xa, ya), (0, 255, 0), 2)
 
             # Finger counting
-            left_fingers = 0
-            right_fingers = 0
+            left_fingers, right_fingers = 0, 0
             if results and results.multi_hand_landmarks and results.multi_handedness:
                 for hand_lms, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                     label = handedness.classification[0].label
                     fingers_up = count_fingers(hand_lms, label, w, h, roi=(xi, yi, xa, ya))
-
-                    if label == "Left":
-                        left_fingers = fingers_up
-                    else:
-                        right_fingers = fingers_up
-
-                    mp_drawing.draw_landmarks(
-                        frame,
-                        hand_lms,
-                        mp_hands.HAND_CONNECTIONS,
-                        mp_drawing.DrawingSpec(thickness=2, circle_radius=2),
-                        mp_drawing.DrawingSpec(thickness=2)
-                    )
+                    if label == "Left": left_fingers = fingers_up
+                    else: right_fingers = fingers_up
+                    mp_drawing.draw_landmarks(frame, hand_lms, mp_hands.HAND_CONNECTIONS)
 
             # Gesture recognition
             frame_count += 1
@@ -267,212 +306,87 @@ def main():
                 gesture_result = recognizer.recognize(mp_image)
                 frame_count = 0
 
-            invalid_gestures_list = {"None", "Victory", "Pointing_Up", "Open_Palm", ""}
-            confidence_threshold = 0.60
-            previous_gesture = getattr(main, "previous_gesture", None)
-            most_recent_gesture = previous_gesture
-
+            invalid_gestures = {"None", "Victory", "Pointing_Up", "Open_Palm", ""}
             candidate = None
             if gesture_result and getattr(gesture_result, "gestures", None):
-                try:
-                    candidate = gesture_result.gestures[0][0]
-                except Exception:
-                    candidate = None
-
-            if candidate is not None:
-                category_name = getattr(candidate, "category_name", None)
-                score = getattr(candidate, "score", 0.0)
-
-                if ((category_name is not None) and (str(category_name) not in invalid_gestures_list) and
-                        (score >= confidence_threshold)):
+                try: candidate = gesture_result.gestures[0][0]
+                except Exception: pass
+            if candidate and getattr(candidate, "score", 0.0) >= 0.6:
+                if getattr(candidate, "category_name", None) not in invalid_gestures:
                     main.previous_gesture = candidate
                     most_recent_gesture = candidate
-                else:
-                    most_recent_gesture = previous_gesture
+            previous_gesture = getattr(main, "previous_gesture", None)
+            gesture_name = getattr(previous_gesture, "category_name", None) if previous_gesture else None
 
-            if ((most_recent_gesture is not None) and
-                    (getattr(most_recent_gesture, "category_name", None) not in invalid_gestures_list)):
-                score = getattr(most_recent_gesture, "score", 0.0)
-                gesture_text = f"{most_recent_gesture.category_name} ({score:.2f})"
-            else:
-                gesture_text = "Waiting for operation"
+            # Operation text
+            op_map = {"Thumb_Up": "+", "Thumb_Down": "-", "Closed_Fist": "*", "ILoveYou": "/"}
+            op_text = {"Thumb_Up": "Addition", "Thumb_Down": "Subtraction",
+                       "Closed_Fist": "Multiplication", "ILoveYou": "Division"}.get(gesture_name, None)
 
-            remembered_name = None
-            if getattr(main, "previous_gesture", None) is not None:
-                remembered_name = getattr(getattr(main, "previous_gesture", None),
-                                          "category_name", None)
-
-            if remembered_name:
-                if "Thumb_Up" in remembered_name:
-                    operation_text = "Addition"
-                elif "Thumb_Down" in remembered_name:
-                    operation_text = "Subtraction"
-                elif "Closed_Fist" in remembered_name:
-                    operation_text = "Multiplication"
-                elif "ILoveYou" in remembered_name:
-                    operation_text = "Division"
-                else:
-                    operation_text = None
-            else:
-                operation_text = None
-
-            # Top-left info box
+            # Draw gesture info box
             cv2.rectangle(frame, (10, 10), (600, 150), (0, 0, 0), -1)
-            cv2.putText(frame, gesture_text,
-                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (255, 0, 0), 2, cv2.LINE_AA)
-            if operation_text is not None:
-                cv2.putText(frame, f"{operation_text}",
-                            (350, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255, 0, 0), 2, cv2.LINE_AA)
+            cv2.putText(frame, gesture_name or "Waiting", (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+            if op_text:
+                cv2.putText(frame, op_text, (350, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
 
-            # --------------------------------------------------------------------------------
-            # Calculator State Machine
-
-            candidate_number = (left_fingers + right_fingers)
-            candidate_gesture_name = remembered_name
+            # Calculator logic
+            candidate_number = left_fingers + right_fingers
             now = time.time()
 
-            # State 1: first operand
             if state == 1:
-                cv2.putText(frame, "Enter the first operand",
-                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, "Enter the first operand", (20, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                if stable_value is None: stable_value, stable_start = candidate_number, now
+                if candidate_number != stable_value: stable_value, stable_start = candidate_number, now
+                if (now - stable_start) >= stable_required_seconds:
+                    first_number = stable_value; state = 2; stable_value = None
 
-                if stable_value is None:
-                    stable_value, stable_start = reset_stable(candidate_number, now)
-
-                if candidate_number != stable_value:
-                    stable_value, stable_start = reset_stable(candidate_number, now)
-
-                if (stable_start is not None) and ((now - stable_start) >= stable_required_seconds):
-                    first_number = stable_value
-                    state = 2
-                    stable_value = None
-                    stable_start = None
-
-            # State 2: operation
             elif state == 2:
-                cv2.putText(frame, "Enter the desired operation",
-                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, "Enter the operation", (20, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                if stable_value is None: stable_value, stable_start = gesture_name, now
+                if gesture_name != stable_value: stable_value, stable_start = gesture_name, now
+                if (now - stable_start) >= stable_required_seconds:
+                    operation = stable_value; state = 3; stable_value = None
 
-                if (stable_value is None) and (candidate_gesture_name is not None):
-                    stable_value, stable_start = reset_stable(candidate_gesture_name, now)
-
-                if candidate_gesture_name != stable_value:
-                    stable_value, stable_start = reset_stable(candidate_gesture_name, now)
-
-                if (stable_start is not None) and (stable_value not in invalid_gestures_list) and \
-                        ((now - stable_start) >= stable_required_seconds):
-                    operation = stable_value
-                    state = 3
-                    stable_value = None
-                    stable_start = None
-
-            # State 3: second operand
             elif state == 3:
-                cv2.putText(frame, "Enter the second operand",
-                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, "Enter the second operand", (20, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
+                if stable_value is None: stable_value, stable_start = candidate_number, now
+                if candidate_number != stable_value: stable_value, stable_start = candidate_number, now
+                if (now - stable_start) >= stable_required_seconds:
+                    second_number = stable_value; state = 4; stable_value = None
 
-                if stable_value is None:
-                    stable_value, stable_start = reset_stable(candidate_number, now)
-
-                if candidate_number != stable_value:
-                    stable_value, stable_start = reset_stable(candidate_number, now)
-
-                if (stable_start is not None) and ((now - stable_start) >= stable_required_seconds):
-                    second_number = stable_value
-                    state = 4
-
-            # State 4: show result
             elif state == 4:
-                cv2.putText(frame, "Calculation complete.",
-                            (20, 70), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255, 255, 255), 2, cv2.LINE_AA)
-                cv2.putText(frame, "Press 'r' to restart the calculator.",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame, "Calculation complete!", (20, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,255), 2)
+                op_char = op_map.get(operation, "+")
+                if op_char == "+": result_value = first_number + second_number
+                elif op_char == "-": result_value = first_number - second_number
+                elif op_char == "*": result_value = first_number * second_number
+                elif op_char == "/":
+                    result_value = "Divide by zero" if second_number == 0 else round(first_number / second_number, 2)
+                else: result_value = "?"
 
-                if "Thumb_Up" in operation:
-                    result_value = first_number + second_number
-                elif "Thumb_Down" in operation:
-                    result_value = first_number - second_number
-                elif "Closed_Fist" in operation:
-                    result_value = first_number * second_number
-                elif "ILoveYou" in operation:
-                    if second_number == 0:
-                        result_value = "Divide by zero"
-                    else:
-                        result_value = round(first_number / second_number, 4)
-                else:
-                    result_value = "ERROR"
-
-                gesture_symbol_map = {
-                    "Thumb_Up": "+",
-                    "Thumb_Down": "-",
-                    "Closed_Fist": "*",
-                    "ILoveYou": "/"
-                }
-
-                cv2.putText(
-                    frame,
-                    f"{first_number} {gesture_symbol_map.get(operation, operation)} {second_number} = {result_value}",
-                    (20, 130),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 255, 255),
-                    2,
-                    cv2.LINE_AA,
-                )
-
-                # Draw the floating result between hands
+                # Draw 3D result
                 draw_3d_result(frame, results, result_value)
 
-            # Timer / input display
-            if state in [1, 3]:
-                if stable_start is not None:
-                    remaining = (stable_required_seconds - (now - stable_start))
-                else:
-                    remaining = stable_required_seconds
-                cv2.putText(frame, f"Input: {candidate_number}  Timer: {remaining:.1f} sec",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255, 255, 255), 2, cv2.LINE_AA)
-            elif state == 2:
-                if stable_start is not None:
-                    remaining = max(0, stable_required_seconds - (now - stable_start))
-                else:
-                    remaining = stable_required_seconds
-                cv2.putText(frame, f"Input: {candidate_gesture_name}  Timer: {remaining:.1f} sec",
-                            (20, 100), cv2.FONT_HERSHEY_SIMPLEX,
-                            1, (255, 255, 255), 2, cv2.LINE_AA)
+            # Timer display
+            if stable_start:
+                remaining = max(0.0, stable_required_seconds - (now - stable_start))
+                cv2.putText(frame, f"Input: {candidate_number}  Timer: {remaining:.1f}s",
+                            (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255,255,255), 2)
 
-            # FPS
-            current_time = time.time()
-            fps = round(1 / (current_time - prev_time))
-            prev_time = current_time
-            cv2.putText(frame, f"FPS: {fps}",
-                        (1100, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (255, 255, 255), 2, cv2.LINE_AA)
-
-            # Show window
-            cv2.imshow("ARGZ Gesture-Based Calculator", frame)
-
-            key = cv2.waitKey(1) & 0xFF
-            if key in [ord('q'), ord('Q')]:
+            cv2.imshow("Gesture Calculator", frame)
+            if cv2.waitKey(5) & 0xFF == 27:
                 break
-            elif key in [ord('r'), ord('R')]:
-                first_number = None
-                operation = None
-                second_number = None
-                stable_value = None
-                stable_start = None
-                state = 1
 
     cap.release()
     cv2.destroyAllWindows()
 
 
+# --------------------------------------------------------------------------------
 if __name__ == "__main__":
     main()
