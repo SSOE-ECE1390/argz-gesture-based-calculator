@@ -39,7 +39,6 @@ The .gitignore file is used to specify any files that should not be included in 
 
 ### requirements.txt
 The requirements.txt file is a way to specify the libraries needed by python by your code.  Here I have a general use one "requirements.txt" and one specifically used in the code regression testing "requirements_dev.txt".  Once you have your python install setup and running the way you like it, you can automatically generate the requirements.txt file for others to replicate your setup using the command
-
 ```
     pip freeze > requirements.txt
 ```
