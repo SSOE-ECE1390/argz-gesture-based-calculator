@@ -1,4 +1,4 @@
-# ARGZ
+# ARGZ Gesture-Based Calculator
 ECE 2390 project: ARGZ Gesture-Based Calculator
 ## Project Description
 The goal of this project is to develop a gesture-based calculator capable of performing basic mathematical operations such as addition, subtraction, multiplication, and division. The calculator will accept integer inputs (1 to 10) from a user by interpreting the user's hand gestures through live video and will perform the desired calculations as indicated by the user. This also includes hand position tracking so that gestures from only one user will be interpreted at a time.

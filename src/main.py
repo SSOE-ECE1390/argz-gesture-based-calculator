@@ -196,10 +196,8 @@ def count_fingers(hand_landmarks, handedness_label, image_width, image_height, r
 # Function to display the output on the frame between the user's hands
 def draw_3d_result(frame, results, result_value):
 
-
     if not (results and results.multi_hand_landmarks and len(results.multi_hand_landmarks) >= 2):
         return
-
 
     left_wrist = results.multi_hand_landmarks[0].landmark[0]
     right_wrist = results.multi_hand_landmarks[1].landmark[0]
@@ -211,10 +209,8 @@ def draw_3d_result(frame, results, result_value):
     h, w, _ = frame.shape
     px, py = int(mid_x * w), int(mid_y * h)
 
-
     scale = max(1.0, 2.0 - abs(mid_z) * 4.0)
 
-   
     for offset in range(3):
         cv2.putText(frame, str(result_value), (px - 60 + offset, py + offset),
                     cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 6, cv2.LINE_AA)
@@ -227,9 +223,9 @@ def draw_3d_result(frame, results, result_value):
 # Main loop for live hand tracking and finger counting
 def main():
     
-    # ** FOR NON-MAC CHANGE to cv2.VideoCapture(0)
-    # ** WINDOWS SPECIFIC is cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    # ** MAC uses cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+    # ** NON-MAC (GLOBAL) to cv2.VideoCapture(0)
+    # ** WINDOWS SPECIFIC cv2.VideoCapture(0, cv2.CAP_DSHOW)
+    # ** MAC SPECIFIC cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
     cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
         raise RuntimeError("Webcam error")
@@ -241,9 +237,6 @@ def main():
     # Load the trained model and label maps
     global custom_model, label_reverse_map, label_map
     custom_model, label_reverse_map, label_map = load_classifier(MODEL_PATH)
-    # -------------------------------
-
-    # Initialize variables before use
     most_recent_gesture_id = None
     main.previous_gesture_id = None 
 
