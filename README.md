@@ -1,7 +1,7 @@
 # ARGZ
 ECE 2390 project: ARGZ Gesture-Based Calculator
 ## Project Description
-The goal of this project is to develop a gesture-based calculator capable of performing basic mathematical operations such as addition, subtraction, multiplication, and division. The calculator will accept multiple integer inputs from a user by interpreting the user's hand gestures through live video and will perform the desired calculations as indicated by the user. This also includes hand position tracking so that gestures from only one user will be interpreted at a time.
+The goal of this project is to develop a gesture-based calculator capable of performing basic mathematical operations such as addition, subtraction, multiplication, and division. The calculator will accept integer inputs (1 to 10) from a user by interpreting the user's hand gestures through live video and will perform the desired calculations as indicated by the user. This also includes hand position tracking so that gestures from only one user will be interpreted at a time.
 
 ## Team Members
 * Zachary Waddell (zmw24@pitt.edu)
@@ -50,21 +50,12 @@ The goal of this project is to develop a gesture-based calculator capable of per
 ```
 ## File Descriptions
 This project contains a number of additional files that are used by GitHub to provide information and do tests on code.
-
 ### Markup files (*.md)
-Markup files, such as this README file are shown on the home page of GitHub
+* README.md: Contains the information about the project such as the project objective, authors, repository structure, description of key files, and usage instruction.
 
-[Here is a good reference for how to use markup files](https://github.com/lifeparticle/Markdown-Cheatsheet)
+* CODE_OF_CONDUCT.md: This file establishes a set of behavioral expectations for contributors and community members, promoting a positive and inclusive environment.
 
-* README.md; This file usually holds information about the purpose of the repo, the authors, etc.  
-
-* CODE_OF_CONDUCT.md; This file establishes a set of behavioral expectations for contributors and community members, promoting a positive and inclusive environment.
-
-* LICENSE.md; This file specifies the licensing terms under which your project is released, informing users about how they can use, modify, and distribute your code.
-
-### .gitignore
-The .gitignore file is used to specify any files that should not be included in git commits/pushes.  Generally, these are temporary files or specific to your computer.  In this case, I have all the python environment files in the .venc folder flagged to be ignored.
-
+* LICENSE.md: This file specifies the licensing terms under which your project is released, informing users about how they can use, modify, and distribute your code.
 ### requirements.txt
 The requirements.txt file is a way to specify the libraries needed by python by your code.  Here I have a general use one "requirements.txt" and one specifically used in the code regression testing "requirements_dev.txt".  Once you have your python install setup and running the way you like it, you can automatically generate the requirements.txt file for others to replicate your setup using the command
 ```
