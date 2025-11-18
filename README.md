@@ -26,27 +26,27 @@ The goal of this project is to develop a gesture-based calculator capable of per
 ├── README.md
 ├── requirements.txt
 ├── src
-│   ├── data
-│   │   ├── Add
-│   │   ├── Divide
-│   │   ├── Minus
-│   │   └── Multiply
-│   ├── Dev_modules
-│   │   ├── __init__.py
-│   │   ├── AR_gab_gesture.py
-│   │   ├── detect_math_gesture.py
-│   │   ├── finger.py
-│   │   ├── gab_gesture.py
-│   │   ├── gab_main.py
-│   │   ├── gesture_recognition.py
-│   │   ├── gesture_training.py
-│   │   ├── roi_changes.py
-│   │   ├── training_pictures.py
-│   │   └── zmw_gesture_calculator.py
-│   ├── gesture_classifier_model.pkl
-│   ├── gesture_recognizer.task
-│   ├── main.py
-│   └── number.stl
+   ├── data
+   │   ├── Add
+   │   ├── Divide
+   │   ├── Minus
+   │   └── Multiply
+   ├── Dev_modules
+   │   ├── __init__.py
+   │   ├── AR_gab_gesture.py
+   │   ├── detect_math_gesture.py
+   │   ├── finger.py
+   │   ├── gab_gesture.py
+   │   ├── gab_main.py
+   │   ├── gesture_recognition.py
+   │   ├── gesture_training.py
+   │   ├── roi_changes.py
+   │   ├── training_pictures.py
+   │   └── zmw_gesture_calculator.py
+   ├── gesture_classifier_model.pkl
+   ├── gesture_recognizer.task
+   ├── main.py
+   └── number.stl
 ```
 ## File Descriptions
 This project contains a number of additional files that are used by GitHub to provide information and do tests on code.
