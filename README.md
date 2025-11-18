@@ -56,13 +56,27 @@ This project contains a number of additional files that are used by GitHub to pr
 * CODE_OF_CONDUCT.md: This file establishes a set of behavioral expectations for contributors and community members, promoting a positive and inclusive environment.
 
 * LICENSE.md: This file specifies the licensing terms under which your project is released, informing users about how they can use, modify, and distribute your code.
-### requirements.txt
-The requirements.txt file is a way to specify the libraries needed by python by your code.  Here I have a general use one "requirements.txt" and one specifically used in the code regression testing "requirements_dev.txt".  Once you have your python install setup and running the way you like it, you can automatically generate the requirements.txt file for others to replicate your setup using the command
-```
-    pip freeze > requirements.txt
-```
 
-To install from a requirements.txt file use
+## Running the project
+1. Clone the project
 ```
-    pip install -r requirements.txt
+git clone <repo-url> gesture_based_calculator
+cd gesture_based_calculator
 ```
+2. Create a Virtual Environment (Python 3.11)
+```
+python3.11 -m venv .venv
+```
+And activate it (for MacOS/Linus):
+```
+source .venv/bin/activate
+```
+For Windows
+```
+.venv\Scripts\activate
+```
+3. Install Dependencies
+```
+pip install -r requirements.txt
+```
+4. Run the project
