@@ -1,0 +1,72 @@
+.
+├── CODE_OF_CONDUCT.md
+├── gesture_classifier_model.pkl
+├── gesture_recognizer.task
+├── LICENSE.md
+├── pyproject.toml
+├── README.md
+├── requirements.txt
+├── src
+│   ├── data
+│   │   ├── Add
+│   │   │   ├── capture_20251026_174113.jpg
+│   │   │   ├── capture_20251026_174118.jpg
+│   │   │   ├── capture_20251026_174123.jpg
+│   │   │   ├── capture_20251026_174128.jpg
+│   │   │   ├── capture_20251026_174133.jpg
+│   │   │   ├── capture_20251026_174138.jpg
+│   │   │   ├── capture_20251026_174143.jpg
+│   │   │   ├── capture_20251026_174148.jpg
+│   │   │   └── capture_20251026_174223.jpg
+│   │   ├── Divide
+│   │   │   ├── capture_20251026_173256.jpg
+│   │   │   ├── capture_20251026_173301.jpg
+│   │   │   ├── capture_20251026_173306.jpg
+│   │   │   ├── capture_20251026_173312.jpg
+│   │   │   ├── capture_20251026_173317.jpg
+│   │   │   ├── capture_20251026_173352.jpg
+│   │   │   ├── capture_20251026_173357.jpg
+│   │   │   ├── capture_20251026_173402.jpg
+│   │   │   ├── capture_20251026_173407.jpg
+│   │   │   └── capture_20251026_173412.jpg
+│   │   ├── Minus
+│   │   │   ├── capture_20251026_173322.jpg
+│   │   │   ├── capture_20251026_173327.jpg
+│   │   │   ├── capture_20251026_173332.jpg
+│   │   │   ├── capture_20251026_173337.jpg
+│   │   │   ├── capture_20251026_173342.jpg
+│   │   │   ├── capture_20251026_173347.jpg
+│   │   │   ├── capture_20251026_173417.jpg
+│   │   │   ├── capture_20251026_173422.jpg
+│   │   │   ├── capture_20251026_173427.jpg
+│   │   │   ├── capture_20251026_173432.jpg
+│   │   │   ├── capture_20251026_173437.jpg
+│   │   │   └── capture_20251026_173442.jpg
+│   │   └── Multiply
+│   │       ├── capture_20251026_174002.jpg
+│   │       ├── capture_20251026_174012.jpg
+│   │       ├── capture_20251026_174017.jpg
+│   │       ├── capture_20251026_174023.jpg
+│   │       ├── capture_20251026_174028.jpg
+│   │       ├── capture_20251026_174033.jpg
+│   │       ├── capture_20251026_174038.jpg
+│   │       └── capture_20251026_174048.jpg
+│   ├── Dev_modules
+│   │   ├── __init__.py
+│   │   ├── AR_gab_gesture.py
+│   │   ├── detect_math_gesture.py
+│   │   ├── finger.py
+│   │   ├── gab_gesture.py
+│   │   ├── gab_main.py
+│   │   ├── gesture_recognition.py
+│   │   ├── gesture_training.py
+│   │   ├── roi_changes.py
+│   │   ├── training_pictures.py
+│   │   └── zmw_gesture_calculator.py
+│   ├── gesture_classifier_model.pkl
+│   ├── gesture_recognizer.task
+│   ├── main.py
+│   └── number.stl
+└── structure.txt
+
+8 directories, 62 files
